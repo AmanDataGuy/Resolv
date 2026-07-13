@@ -216,3 +216,40 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# Resolv data — entire data/ folder ignored (raw Kaggle datasets, mock fixtures,
+# and generated fine-tune artifacts). Mock fixture JSON is small enough to version,
+# but keeping the whole folder ignored is simpler and was the explicit choice here.
+data/
+
+# Resolv local-only docs — personal study notes, the original planning spec, and
+# the internal fine-tuning write-up. README.md is the public-facing source of
+# truth; these stay local, never pushed.
+notes.md
+resolv.md
+finetuning_report.md
+
+# Resolv fine-tune artifacts — LoRA adapters, downloaded model zips, and training
+# run outputs. Large binaries and reproducible outputs, never committed (README
+# says as much). The whole models/ tree holds adapter_config.json +
+# adapter_model.safetensors per stage plus resolv_adapters.zip.
+models/
+wandb/
+outputs/
+*.safetensors
+*.ckpt
+
+# Training environment — the separate heavy venv for llamafactory/trl/torch. The
+# generic `venv/` rule below doesn't match this name, and only its Lib/ was being
+# caught by the lowercase `lib/` rule, so the rest of it would otherwise commit.
+.venv-train/
+
+# Claude Code local files — settings, agent definitions, session/plugin state.
+# Machine-local tooling, not part of the project; kept out of GitHub explicitly
+# (a global gitignore was catching .claude/, but that isn't portable to a clone).
+.claude/
+.mcp.json
+
+# Eval/generation logs written to repo root (*.log is also covered above under the
+# Django block, listed here too for clarity).
+gen_*.log
