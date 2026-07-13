@@ -1,0 +1,15 @@
+# Phase 0/1 — what's actually imported by the code today.
+# Phase 2+ deps (google-cloud-firestore, sendgrid, twilio, slack-sdk, deepgram-sdk,
+# llamafactory, deepeval) are added when those phases start, not pre-installed
+# speculatively — same audit discipline as the rest of the project.
+google-adk
+fastapi
+uvicorn[standard]
+pydantic
+python-dotenv
+litellm
+sentence-transformers
+pandas
+pytest
+pytest-asyncio
+ruff
