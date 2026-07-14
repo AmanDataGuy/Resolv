@@ -1,0 +1,24 @@
+# CI — lint + test on every push and pull request.
+#
+# The full requirements install lets the RAG (sentence-transformers) tests run too;
+# numpy/pyarrow are pinned in requirements.txt so the native stack is stable in CI.
+# No secrets are needed: the two LLM agents (detector, drafter) are never exercised
+# by the test suite — only the deterministic harness, RAG, and reward are.
+name: CI
+
+on: [push, pull_request]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+      - run: pip install -r requirements.txt
+      - name: Lint
+        run: ruff check .
+      - name: Tests
+        run: pytest -q

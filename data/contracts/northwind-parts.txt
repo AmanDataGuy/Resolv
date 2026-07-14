@@ -1,0 +1,48 @@
+SUPPLY AGREEMENT — NORTHWIND PARTS CO
+Master Services Agreement, Section 3: Delivery Obligations
+
+Clause 3.1 — Notification of Delay
+Supplier shall notify Buyer within twenty-four (24) hours of becoming aware of
+any circumstance likely to delay delivery beyond the agreed delivery window.
+
+Master Services Agreement, Section 4: Late Delivery and Penalties
+
+Clause 4.1 — Late Delivery Penalty
+Where Supplier fails to deliver any order by the estimated delivery date, Buyer
+shall be entitled to a service credit equal to one and one-half percent (1.5%)
+of the shipment value for each order affected, calculated against the total
+invoiced value of the delayed shipment.
+
+Clause 4.2 — Repeated Delay
+Three or more late deliveries within a rolling sixty (60) day period entitle
+Buyer to require a corrective action plan or to source the affected volume from
+an alternate supplier without penalty to Buyer.
+
+Master Services Agreement, Section 5: Product Quality and Rejection
+
+Clause 5.1 — Inspection and Rejection
+Buyer may inspect any shipment within seventy-two (72) hours of receipt and
+reject any unit that fails to conform to the agreed specification. Supplier
+shall issue a full credit note within ten (10) business days of collection of
+rejected goods.
+
+Master Services Agreement, Section 6: Supplier Capacity
+
+Clause 6.1 — Capacity Shortfall Notice
+Where Supplier cannot fulfill a confirmed order due to a capacity shortfall,
+Supplier must notify Buyer within twelve (12) hours of identifying the
+shortfall.
+
+Master Services Agreement, Section 7: Customs and Cross-Border Shipments
+
+Clause 7.1 — Documentation Responsibility
+For any shipment crossing an international border, Supplier is responsible for
+providing complete and accurate customs documentation at least forty-eight (48)
+hours prior to the scheduled ship date.
+
+Master Services Agreement, Section 8: Invoicing and Payment Disputes
+
+Clause 8.1 — Invoice Accuracy
+Supplier shall issue invoices matching the corresponding Purchase Order in unit
+price, quantity, and applicable discounts. Buyer may raise a price dispute in
+writing within seventy-two (72) hours of receiving a non-matching invoice.
