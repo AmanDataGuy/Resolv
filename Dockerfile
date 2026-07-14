@@ -12,8 +12,13 @@ FROM python:3.11-slim
 WORKDIR /app
 
 # Install deps first so this layer caches unless requirements.txt changes.
+# Install the CPU-only torch explicitly: the default wheel bundles CUDA libraries
+# (~500 MB download, ~2 GB installed) that a CPU container never uses. The CPU wheel
+# is far smaller, and sentence-transformers then sees torch already present and won't
+# pull the big one.
 COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+RUN pip install --no-cache-dir torch --index-url https://download.pytorch.org/whl/cpu \
+ && pip install --no-cache-dir -r requirements.txt
 
 # Copy source + the small mock fixtures (.dockerignore keeps raw data / models out).
 COPY . .
