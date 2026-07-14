@@ -1,0 +1,82 @@
+[
+  {
+    "order_id": "ORD-1001",
+    "supplier_id": "acme-logistics",
+    "customer_id": "CUST-500",
+    "shipment_value_usd": 18000.0,
+    "status": "delayed",
+    "estimated_delivery": "2026-07-01",
+    "actual_delivery": null,
+    "product_ids": ["PROD-10", "PROD-11"]
+  },
+  {
+    "order_id": "ORD-1002",
+    "supplier_id": "acme-logistics",
+    "customer_id": "CUST-501",
+    "shipment_value_usd": 24000.0,
+    "status": "delayed",
+    "estimated_delivery": "2026-07-01",
+    "actual_delivery": null,
+    "product_ids": ["PROD-10"]
+  },
+  {
+    "order_id": "ORD-2001",
+    "supplier_id": "northwind-parts",
+    "customer_id": "CUST-600",
+    "shipment_value_usd": 6000.0,
+    "status": "in_transit",
+    "estimated_delivery": "2026-07-10",
+    "actual_delivery": null,
+    "product_ids": ["PROD-40"]
+  },
+  {
+    "order_id": "ORD-3001",
+    "supplier_id": "northwind-parts",
+    "customer_id": "CUST-602",
+    "shipment_value_usd": 4200.0,
+    "status": "backordered",
+    "estimated_delivery": "2026-07-12",
+    "actual_delivery": null,
+    "product_ids": ["PROD-41"]
+  },
+  {
+    "order_id": "ORD-4001",
+    "supplier_id": "acme-logistics",
+    "customer_id": "CUST-503",
+    "shipment_value_usd": 15500.0,
+    "status": "customs_hold",
+    "estimated_delivery": "2026-07-08",
+    "actual_delivery": null,
+    "product_ids": ["PROD-12"]
+  },
+  {
+    "order_id": "ORD-5001",
+    "supplier_id": "acme-logistics",
+    "customer_id": "CUST-504",
+    "shipment_value_usd": 9000.0,
+    "status": "quality_rejected",
+    "estimated_delivery": "2026-06-28",
+    "actual_delivery": "2026-06-28",
+    "product_ids": ["PROD-13"]
+  },
+  {
+    "order_id": "ORD-6001",
+    "supplier_id": "northwind-parts",
+    "customer_id": "CUST-603",
+    "shipment_value_usd": 12800.0,
+    "status": "capacity_shortfall",
+    "estimated_delivery": "2026-07-15",
+    "actual_delivery": null,
+    "product_ids": ["PROD-42"]
+  },
+  {
+    "order_id": "ORD-7001",
+    "supplier_id": "acme-logistics",
+    "customer_id": "CUST-505",
+    "shipment_value_usd": 7300.0,
+    "status": "invoiced",
+    "estimated_delivery": "2026-06-20",
+    "actual_delivery": "2026-06-19",
+    "product_ids": ["PROD-14"]
+  }
+]

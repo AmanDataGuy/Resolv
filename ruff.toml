@@ -1,0 +1,9 @@
+# Lint config for CI and local use. Ruff auto-excludes anything in .gitignore
+# (venvs, data/, study/, models/), so `ruff check .` only lints project source.
+line-length = 120
+
+[lint]
+# Pyflakes (F) catches the real bugs — unused imports, undefined names — plus the
+# default error subset. Line-length (E5) is intentionally not selected: docstrings
+# and f-strings run long and wrapping them hurts readability more than it helps.
+select = ["E4", "E7", "E9", "F"]

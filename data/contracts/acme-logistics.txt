@@ -1,0 +1,63 @@
+SUPPLY AGREEMENT — ACME LOGISTICS LTD
+Master Services Agreement, Section 3: Delivery Obligations
+
+Clause 3.1 — Notification of Delay
+Supplier shall notify Buyer in writing within twenty-four (24) hours of becoming
+aware of any circumstance likely to delay delivery of any order beyond the agreed
+delivery window. Failure to notify within this window constitutes an independent
+breach, regardless of any penalty owed under Clause 3.2.
+
+Clause 3.2 — Late Delivery Penalty
+Where Supplier fails to deliver any order by the estimated delivery date, Buyer
+shall be entitled to a service credit equal to two percent (2.0%) of the shipment
+value for each order affected by the delay, calculated against the total invoiced
+value of the delayed shipment. This credit is Buyer's sole financial remedy for
+delay under this Section, without prejudice to Buyer's right to terminate under
+Section 8 for repeated or systemic delays.
+
+Clause 3.3 — Force Majeure
+Neither party shall be liable for delay caused by events beyond its reasonable
+control, including natural disaster, labor action, or governmental restriction,
+provided the affected party gives notice within the timeframe specified in
+Clause 3.1 and uses commercially reasonable efforts to mitigate the delay.
+
+Master Services Agreement, Section 4: Product Quality and Rejection
+
+Clause 4.1 — Inspection Rights
+Buyer may inspect any shipment within seventy-two (72) hours of receipt and
+reject any unit that fails to conform to the specifications set out in Exhibit A.
+
+Clause 4.2 — Rejection Notice and Return
+Buyer shall notify Supplier of a rejection within twenty-four (24) hours of the
+inspection finding. Supplier shall arrange collection of rejected goods within
+five (5) business days and issue a full credit note within ten (10) business days
+of collection. Repeated quality failures affecting more than five percent (5%) of
+units in a rolling ninety (90) day period entitle Buyer to require a corrective
+action plan under Clause 4.3.
+
+Master Services Agreement, Section 5: Supplier Capacity
+
+Clause 5.1 — Capacity Warranty
+Supplier warrants it maintains sufficient production and fulfillment capacity to
+meet Buyer's forecast order volumes as updated quarterly under Exhibit B. Where
+Supplier cannot fulfill a confirmed order due to a capacity shortfall, Supplier
+must notify Buyer within twelve (12) hours of identifying the shortfall so that
+Buyer may source an alternate supplier for the affected volume.
+
+Master Services Agreement, Section 6: Customs and Cross-Border Shipments
+
+Clause 6.1 — Documentation Responsibility
+For any shipment crossing an international border, Supplier is responsible for
+providing complete and accurate customs documentation at least forty-eight (48)
+hours prior to the scheduled ship date. A customs hold caused by incomplete or
+inaccurate documentation supplied by Supplier is treated as a Supplier-caused
+delay under Clause 3.2.
+
+Master Services Agreement, Section 7: Invoicing and Payment Disputes
+
+Clause 7.1 — Invoice Accuracy
+Supplier shall issue invoices that match the corresponding Purchase Order in
+unit price, quantity, and applicable discounts. Buyer may raise a price dispute
+in writing within seventy-two (72) hours of receiving an invoice that does not
+match the Purchase Order. Payment on the disputed line items is suspended until
+the discrepancy is resolved in writing by both parties.

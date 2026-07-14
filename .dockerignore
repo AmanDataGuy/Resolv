@@ -1,0 +1,17 @@
+# Keep the build context (and image) lean. The app needs only source + the small
+# mock fixtures (data/mock_*.json, data/contracts/*.txt) — everything heavy or
+# training-only is excluded here.
+.git
+.github
+venv
+.venv-train
+**/__pycache__
+*.log
+study
+models
+data/raw
+data/exceptions_pool_*.json
+data/resolv_*.json
+data/build_results.json
+data/eval_drafts.json
+.env

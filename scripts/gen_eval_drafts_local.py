@@ -25,7 +25,7 @@ import torch
 from peft import PeftModel
 from transformers import AutoModelForCausalLM, AutoTokenizer
 
-from eval_finetune import DATA_DIR, DRAFTS_FILE, load_heldout  # sibling module (same scripts/ dir)
+from eval_finetune import DRAFTS_FILE, load_heldout  # sibling module (same scripts/ dir)
 
 BASE = "Qwen/Qwen2.5-1.5B-Instruct"
 STAGES = ["sft", "orpo", "grpo"]  # adapter dirs under models/adapters/<stage>/latest

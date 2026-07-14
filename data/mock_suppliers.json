@@ -1,0 +1,57 @@
+{
+  "acme-logistics": {
+    "supplier_id": "acme-logistics",
+    "name": "Acme Logistics Ltd",
+    "contact_email": "ops@acme-logistics.example.com",
+    "contact_phone": "+15550100001",
+    "account_manager": "J. Rivera",
+    "product_categories": ["electronics", "packaging"],
+    "is_strategic": true,
+    "risk_score": 22.0,
+    "sla_terms": {
+      "late_delivery_penalty_pct": 2.0,
+      "notification_deadline_hours": {
+        "late_shipment": 24,
+        "stockout": 12,
+        "customs_hold": 48,
+        "quality_rejection": 24,
+        "supplier_failure": 12,
+        "price_dispute": 72
+      },
+      "penalty_clause_id": "3.2"
+    }
+  },
+  "northwind-parts": {
+    "supplier_id": "northwind-parts",
+    "name": "Northwind Parts Co",
+    "contact_email": "supplychain@northwind-parts.example.com",
+    "contact_phone": "+15550100002",
+    "account_manager": "S. Okafor",
+    "product_categories": ["hardware", "fasteners"],
+    "is_strategic": false,
+    "risk_score": 61.0,
+    "sla_terms": {
+      "late_delivery_penalty_pct": 1.5,
+      "notification_deadline_hours": {
+        "late_shipment": 24,
+        "stockout": 12,
+        "customs_hold": 48,
+        "quality_rejection": 24,
+        "supplier_failure": 12,
+        "price_dispute": 72
+      },
+      "penalty_clause_id": "4.1"
+    }
+  },
+  "no-contact-supplier": {
+    "supplier_id": "no-contact-supplier",
+    "name": "Unregistered Vendor",
+    "contact_email": null,
+    "contact_phone": null,
+    "account_manager": null,
+    "product_categories": ["misc"],
+    "is_strategic": false,
+    "risk_score": 90.0,
+    "sla_terms": {}
+  }
+}
