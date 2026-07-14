@@ -20,20 +20,8 @@ async def send_email(to: str, subject: str, body: str, from_name: str = "Resolv 
     raise NotImplementedError("Live email sending (SendGrid) not wired yet — runs in draft mode.")
 
 
-async def send_sms(to: str, message: str) -> dict:
-    if SEND_MODE != "live":
-        _DRAFT_LOG.append({"to": to, "sms": message})
-        return {"sent": False, "mode": "draft"}
-    raise NotImplementedError("Live SMS sending (Twilio) not wired yet — runs in draft mode.")
-
-
 async def post_slack(channel: str, message: str, blocks: list | None = None) -> dict:
     """Draft mode: logs the message locally instead of posting. Swap in the real
     Slack SDK call here behind the same signature to go live."""
     _DRAFT_LOG.append({"channel": channel, "message": message})
     return {"ok": True, "mode": "draft"}
-
-
-def get_draft_log() -> list[dict]:
-    """Test/debug helper: everything that would have been sent in live mode."""
-    return list(_DRAFT_LOG)

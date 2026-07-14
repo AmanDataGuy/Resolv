@@ -229,6 +229,10 @@ notes.md
 resolv.md
 finetuning_report.md
 
+# Personal study material — long-form learning notes for this project. Local only,
+# never pushed. The fine-tuning report now lives inside study/ as well.
+study/
+
 # Resolv fine-tune artifacts — LoRA adapters, downloaded model zips, and training
 # run outputs. Large binaries and reproducible outputs, never committed (README
 # says as much). The whole models/ tree holds adapter_config.json +

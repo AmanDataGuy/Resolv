@@ -152,7 +152,7 @@ def main() -> None:
 
     n = len(drafts)
     print(f"Evaluated {n} held-out contexts\n")
-    print(f"{'':12} {'facts (/2)':>12} {'tone (/5)':>12} {'Δfacts':>10} {'Δtone':>10}")
+    print(f"{'':12} {'facts (/2)':>12} {'tone (/5)':>12} {'d-facts':>10} {'d-tone':>10}")
     base_f = agg["BASE"]["facts"] / n
     base_t = agg["BASE"]["tone"] / n
     for label, _ in stages:
@@ -160,7 +160,7 @@ def main() -> None:
         df = "" if label == "BASE" else f"{f - base_f:+.2f}"
         dt = "" if label == "BASE" else f"{t - base_t:+.2f}"
         print(f"{label:12} {f:>12.2f} {t:>12.2f} {df:>10} {dt:>10}")
-    print("\n(Δ = change vs BASE. Facts is the axis the RLVR reward optimized; tone is the LLM-judge axis.)")
+    print("\n(d = change vs BASE. Facts is the axis the RLVR reward optimized; tone is the LLM-judge axis.)")
 
 
 if __name__ == "__main__":
