@@ -17,6 +17,7 @@ from agents.detector import detector_agent
 from agents.drafter import drafter_agent
 from agents.runner_utils import run_agent_once, to_prompt
 from comms import post_slack, send_email
+from config import drafter_backend
 from db import update_exception_state
 from harness.escalation import decide_escalation
 from harness.guardrails import apply_draft_guardrail, verify_draft
@@ -55,16 +56,23 @@ async def process_exception(raw_event: dict) -> dict:
         revenue_at_risk_usd=impact.revenue_at_risk_usd,
     )
 
-    draft_prompt = to_prompt(
-        {
-            **exception_event.model_dump(mode="json"),
-            **impact.model_dump(mode="json"),
-            **supplier_context.model_dump(mode="json"),
-            **sla_findings.model_dump(mode="json"),
-        }
-    )
-    draft_data = await run_agent_once(drafter_agent, draft_prompt, "resolution_draft")
-    draft = ResolutionDraft.model_validate(draft_data)
+    if drafter_backend() == "finetuned":
+        # Use the local fine-tuned GRPO adapter instead of Groq. Imported here so the
+        # heavy ML stack is only touched when this backend is actually selected.
+        from agents.drafter_local import draft_local
+
+        draft = draft_local(exception_event, impact, sla_findings)
+    else:
+        draft_prompt = to_prompt(
+            {
+                **exception_event.model_dump(mode="json"),
+                **impact.model_dump(mode="json"),
+                **supplier_context.model_dump(mode="json"),
+                **sla_findings.model_dump(mode="json"),
+            }
+        )
+        draft_data = await run_agent_once(drafter_agent, draft_prompt, "resolution_draft")
+        draft = ResolutionDraft.model_validate(draft_data)
 
     decision = decide_escalation(
         exception_type=exception_event.exception_type,

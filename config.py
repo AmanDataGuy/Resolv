@@ -23,7 +23,6 @@ from dotenv import load_dotenv
 load_dotenv()
 
 GEMINI_MODEL_FAST = "gemini-2.0-flash"
-GEMINI_MODEL_SMART = "gemini-2.5-pro"
 GROQ_MODEL = "groq/llama-3.3-70b-versatile"
 
 # Groq key rotation: litellm (the library ADK's LiteLlm wrapper calls under the
@@ -78,15 +77,19 @@ def get_model():
 
 SEND_MODE = os.environ.get("SEND_MODE", "draft")
 
+
+def drafter_backend() -> str:
+    """Which drafter writes the email: 'groq' (default, the ADK LlmAgent) or
+    'finetuned' (the local GRPO LoRA adapter, see agents/drafter_local.py). Read at
+    call time so the Streamlit demo can flip it per request via the env var."""
+    return os.environ.get("DRAFTER_BACKEND", "groq")
+
 AUTO_RESOLVE_CONFIDENCE_THRESHOLD = float(os.environ.get("AUTO_RESOLVE_CONFIDENCE_THRESHOLD", 0.85))
 AUTO_RESOLVE_MAX_RISK_USD = float(os.environ.get("AUTO_RESOLVE_MAX_RISK_USD", 10000.0))
 
 # Exception types that must never auto-resolve, regardless of confidence/revenue.
 # Enforced in harness/escalation.py, not just an LLM instruction.
 NEVER_AUTO_RESOLVE_TYPES = {"quality_rejection", "supplier_failure"}
-
-GCP_PROJECT_ID = os.environ.get("GCP_PROJECT_ID", "")
-GCP_REGION = os.environ.get("GCP_REGION", "us-central1")
 
 MOCK_DATA_DIR = os.path.join(os.path.dirname(__file__), "data")
 CONTRACTS_DIR = os.path.join(MOCK_DATA_DIR, "contracts")

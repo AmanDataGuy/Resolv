@@ -78,12 +78,14 @@ The demanded ML skill, done end-to-end and reported honestly. A Qwen2.5-1.5B-Ins
 
 What makes it **RLVR, not RLHF**: the reward is [`harness/guardrails.py`](harness/guardrails.py) — the *exact same deterministic check that gates a live send* (order ID present, amount correct), run on each rollout. No LLM judge anywhere. One definition of "did the draft get the facts right," used in both training and production.
 
-**The result — measured on 100 held-out contexts** (rows 50–99 of the pools, never trained on) via [`scripts/eval_finetune.py`](scripts/eval_finetune.py): RLVR lifted fact-inclusion from **82% → 96%** (+0.29 on a 2-point scale) — *exactly the axis the reward optimized* — while tone stayed at the LLM-judge's ceiling (~4.9/5 for both base and fine-tuned, a ceiling effect, not a regression). The eval scores two axes: deterministic **facts** (the RLVR-optimized axis) and an LLM-judged **tone** score.
+**The result — measured on 100 held-out contexts** (rows 50–99 of the pools, never trained on) via [`scripts/eval_finetune.py`](scripts/eval_finetune.py), scored per stage: RLVR lifted fact-inclusion from **80% → 90%** (+0.21 on a 2-point scale) — *exactly the axis the reward optimized* — while tone stayed at the LLM-judge's ceiling (~4.95/5 across every stage, a ceiling effect, not a regression). The eval scores two axes: deterministic **facts** (the RLVR-optimized axis) and an LLM-judged **tone** score.
 
 ```
-               facts (/2)   tone (/5)
-BASE                 1.64        4.95
-GRPO (RLVR)          1.93        4.93     Δ facts +0.29
+               facts (/2)   tone (/5)   Δ facts
+BASE                 1.60        4.96
+SFT                  1.75        4.95     +0.15
+ORPO                 1.72        4.95     +0.12
+GRPO (RLVR)          1.81        4.95     +0.21
 ```
 
 The takeaway is honest and complementary, not either/or: the deterministic harness **guarantees** these facts at send time regardless of the model, *and* RLVR independently **sharpened** the model's own fact-inclusion. Correctness doesn't depend on the training — but the training still moved the exact metric it was rewarded on, on unseen data.

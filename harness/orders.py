@@ -34,16 +34,3 @@ async def query_orders_by_supplier(
     if status_filter:
         orders = [o for o in orders if o["status"] in status_filter]
     return orders
-
-
-async def get_order_details(order_id: str) -> dict:
-    """Returns a single order document, or {} if not found."""
-    for order in _load_orders():
-        if order["order_id"] == order_id:
-            return order
-    return {}
-
-
-async def get_orders_by_ids(order_ids: list[str]) -> list[dict]:
-    """Returns orders matching any of the given order_ids."""
-    return [o for o in _load_orders() if o["order_id"] in order_ids]

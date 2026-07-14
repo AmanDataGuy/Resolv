@@ -1,7 +1,4 @@
-# Phase 0/1 — what's actually imported by the code today.
-# Phase 2+ deps (google-cloud-firestore, sendgrid, twilio, slack-sdk, deepgram-sdk,
-# llamafactory, deepeval) are added when those phases start, not pre-installed
-# speculatively — same audit discipline as the rest of the project.
+# Python dependencies actually imported by the running code.
 google-adk
 fastapi
 uvicorn[standard]
@@ -10,6 +7,13 @@ python-dotenv
 litellm
 sentence-transformers
 pandas
+# numpy/pyarrow are pinned deliberately: torch 2.5.1 + sentence-transformers need
+# numpy 2.1.x and a matching pyarrow build. Newer numpy (2.4+, e.g. what streamlit
+# pulls unpinned) segfaults the native sentence-transformers encode on import.
+numpy==2.1.3
+pyarrow>=17,<19
+peft              # local fine-tuned drafter backend (agents/drafter_local.py)
+streamlit         # demo UI (app.py)
 pytest
 pytest-asyncio
 ruff
