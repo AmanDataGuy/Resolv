@@ -52,7 +52,7 @@ import time
 from pathlib import Path
 
 DATA_DIR = Path(__file__).parent.parent / "data"
-DRAFTS_FILE = DATA_DIR / "eval_drafts.json"
+DRAFTS_FILE = DATA_DIR / "datasets" / "legacy" / "eval_drafts.json"
 
 # Groq is 30 req/min per key; a full run is ~200 tone calls. Rotate across the
 # configured keys and back off on a rate-limit so the eval doesn't die mid-run.
@@ -68,7 +68,7 @@ def load_heldout() -> list[dict]:
     """
     rows = []
     for pool in ["late_shipment", "price_dispute"]:
-        path = DATA_DIR / f"exceptions_pool_{pool}.json"
+        path = DATA_DIR / "pools" / f"exceptions_pool_{pool}.json"
         if not path.exists():
             continue
         for ctx in json.loads(path.read_text())[50:100]:

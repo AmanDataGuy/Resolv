@@ -82,3 +82,44 @@ class EscalationDecision(BaseModel):
     confidence: float
     reason: str
     notify_channels: list[Literal["email", "sms", "voice", "slack"]]
+
+
+# --- Customer-complaint intake (chat / email / transcript) ---------------------
+# The intake side of the pipeline: a real person describes a problem in their own
+# words, and the extractor turns that into a typed claim the harness can verify.
+
+ClaimType = Literal["late_delivery", "damaged", "never_arrived", "wrong_item"]
+
+
+class CustomerClaim(BaseModel):
+    """What the extractor must pull out of a messy customer message.
+
+    Deliberately narrow: WHICH order and WHAT KIND of problem. It does NOT ask the
+    model for the amount or the real dates — customers misremember those, so the
+    harness looks them up from the order record instead. Same split as everywhere
+    else here: the model reads, the harness knows the numbers.
+
+    order_id is optional on purpose: if the customer never gives one, the correct
+    answer is None ("unknown"), not a hallucinated order.
+    stated_amount_usd is captured only to cross-check against the record — it is
+    never trusted as fact.
+    """
+
+    order_id: str | None = None
+    claim_type: ClaimType
+    stated_amount_usd: float | None = None
+
+
+class ComplaintCase(BaseModel):
+    """One generated case: a messy message plus its exact answer key.
+
+    Built by scripts/gen_complaint_cases.py from a REAL late Olist delivery, so the
+    ground truth is known before the message exists — which is what makes the
+    extraction reward genuinely verifiable rather than judged.
+    """
+
+    case_id: str
+    channel: Literal["chat", "email", "transcript"]
+    difficulty: Literal["easy", "medium", "hard"]
+    message: str
+    ground_truth: CustomerClaim

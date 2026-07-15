@@ -15,9 +15,9 @@ backing store later is a change inside these functions only, never at any caller
 """
 import json
 
-from config import MOCK_DATA_DIR
+from config import DB_DIR
 
-_ORDERS_FILE = f"{MOCK_DATA_DIR}/mock_orders.json"
+_ORDERS_FILE = f"{DB_DIR}/mock_orders.json"
 
 
 def _load_orders() -> list[dict]:

@@ -103,7 +103,7 @@ Single-stage dense retrieval (`all-MiniLM-L6-v2`, cosine similarity) over unstru
 | Layer | Choice |
 |---|---|
 | **Agents** | Google ADK (`LlmAgent`, `output_schema`/`output_key`) — 2 agents only |
-| **LLM** | Groq `llama-3.3-70b-versatile` via ADK's `LiteLlm`, 3-key rotation with rate-limit backoff; Gemini fallback |
+| **LLM** | **Gemini 3.5 Flash** on the live path — ADK speaks Gemini natively, so no litellm in the deployed code. Groq `llama-3.3-70b` (via `LiteLlm`, 3-key rotation + backoff) is the fallback and powers the high-volume offline eval judge |
 | **Harness** | Deterministic Python — impact, suppliers, SLA, escalation, guardrails (no API key needed to test) |
 | **RAG** | `sentence-transformers/all-MiniLM-L6-v2` (384-dim, local CPU), cosine over contract clauses |
 | **Fine-tuning** | Qwen2.5-1.5B-Instruct + LoRA · LlamaFactory (SFT, ORPO) · TRL `GRPOTrainer` (RLVR) · W&B tracking |

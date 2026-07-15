@@ -20,7 +20,7 @@ from pathlib import Path
 import pandas as pd
 
 RAW_FILE = Path(__file__).parent.parent / "data" / "raw" / "dataco" / "DataCoSupplyChainDataset.csv"
-OUTPUT_PATH = Path(__file__).parent.parent / "data" / "exceptions_pool_price_dispute.json"
+OUTPUT_PATH = Path(__file__).parent.parent / "data" / "pools" / "exceptions_pool_price_dispute.json"
 MAX_ROWS = 500
 
 

@@ -10,8 +10,7 @@ venv
 study
 models
 data/raw
-data/exceptions_pool_*.json
-data/resolv_*.json
-data/build_results.json
-data/eval_drafts.json
+data/pools
+data/datasets
+data/cache
 .env

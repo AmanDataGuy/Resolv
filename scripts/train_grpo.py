@@ -26,7 +26,7 @@ from trl import GRPOConfig, GRPOTrainer
 BASE = "Qwen/Qwen2.5-1.5B-Instruct"
 START_ADAPTER = "models/adapters/orpo/latest"  # build on SFT+ORPO
 OUT = "models/adapters/grpo/latest"
-DATA_DIR = Path("data")
+DATA_DIR = Path("data/datasets/legacy")
 
 
 def _load_prompts() -> Dataset:

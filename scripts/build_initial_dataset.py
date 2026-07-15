@@ -34,7 +34,9 @@ _GROQ_KEYS = [
 _key_i = 0
 
 DATA_DIR = Path(__file__).parent.parent / "data"
-CACHE_FILE = DATA_DIR / "build_results.json"
+POOLS_DIR = DATA_DIR / "pools"
+OUT_DIR = DATA_DIR / "datasets" / "legacy"   # the email-drafting era, superseded by complaint_cases
+CACHE_FILE = DATA_DIR / "cache" / "build_results.json"
 
 MAX_PER_TYPE = 50  # real run: ~300 contexts, ~600 Groq calls, resumable via build_results.json
 MIN_SFT_SCORE = 65
@@ -131,7 +133,7 @@ def _score_draft(context: dict, draft_text: str) -> int:
 
 
 def _load_pool(filename: str) -> list[dict]:
-    path = DATA_DIR / filename
+    path = POOLS_DIR / filename
     if not path.exists():
         return []
     return json.loads(path.read_text())
@@ -184,8 +186,8 @@ def main() -> None:
         if entry["score"] >= MIN_ORPO_CHOSEN_SCORE:
             orpo_pairs.append({"prompt": entry["context_str"], "chosen": entry["good"], "rejected": entry["bad"]})
 
-    (DATA_DIR / "resolv_sft.json").write_text(json.dumps(sft_pairs, indent=2))
-    (DATA_DIR / "resolv_orpo.json").write_text(json.dumps(orpo_pairs, indent=2))
+    (OUT_DIR / "resolv_sft.json").write_text(json.dumps(sft_pairs, indent=2))
+    (OUT_DIR / "resolv_orpo.json").write_text(json.dumps(orpo_pairs, indent=2))
 
     print(f"Processed {len(all_contexts)} contexts")
     print(f"SFT pairs: {len(sft_pairs)}")

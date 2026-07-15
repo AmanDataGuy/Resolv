@@ -1,9 +1,14 @@
 """Turns real Olist late-delivery orders into late_shipment exception contexts.
 
 Real signal used: order_status == "delivered" AND order_delivered_customer_date
-> order_estimated_delivery_date — 7,826 rows out of 99,441 total orders. Capped
-at 500 here to keep the bootstrap
-dataset a manageable size for a first SFT pass, same cap resolv.md v1 used.
+> order_estimated_delivery_date — 7,826 rows out of 99,441 total orders. Capped at
+800 to stay a manageable dataset while clearing the 500-example floor recommended
+for narrow fine-tuning.
+
+The promised/delivered dates and customer_id are carried through deliberately: a
+realistic customer complaint says "it was due on the 14th and turned up on the 20th",
+so the downstream generator (scripts/gen_complaint_cases.py) needs the real dates, not
+just the day count. These same dates are what the harness later checks a claim against.
 
 Olist has a real seller_id (a genuine marketplace entity) — this is why Olist,
 not DataCo, is the late_shipment source: DataCo has no supplier/seller column at
@@ -19,8 +24,8 @@ from pathlib import Path
 import pandas as pd
 
 RAW_DIR = Path(__file__).parent.parent / "data" / "raw" / "olist"
-OUTPUT_PATH = Path(__file__).parent.parent / "data" / "exceptions_pool_late_shipment.json"
-MAX_ROWS = 500
+OUTPUT_PATH = Path(__file__).parent.parent / "data" / "pools" / "exceptions_pool_late_shipment.json"
+MAX_ROWS = 800
 
 
 def main() -> None:
@@ -51,8 +56,12 @@ def main() -> None:
             "exception_type": "late_shipment",
             "supplier_id": row["seller_id"],
             "order_ids": [row["order_id"]],
+            "customer_id": row["customer_id"],
             "delay_days": int(row["delay_days"]),
             "revenue_at_risk_usd": round(float(row["revenue_at_risk_usd"]), 2),
+            # real dates — a complaint quotes them, and the harness verifies against them
+            "promised_date": row["order_estimated_delivery_date"].date().isoformat(),
+            "delivered_date": row["order_delivered_customer_date"].date().isoformat(),
             "source": "olist",
         }
         for _, row in merged.head(MAX_ROWS).iterrows()
