@@ -16,7 +16,7 @@ from pathlib import Path
 import pandas as pd
 
 RAW_FILE = Path(__file__).parent.parent / "data" / "raw" / "supply_chain" / "supply_chain_data.csv"
-OUTPUT_DIR = Path(__file__).parent.parent / "data"
+OUTPUT_DIR = Path(__file__).parent.parent / "data" / "pools"
 
 
 def _supplier_id(name: str) -> str:

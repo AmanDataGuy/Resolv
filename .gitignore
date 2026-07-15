@@ -222,11 +222,7 @@ __marimo__/
 # training sets, and model artifacts stay ignored. Shipping the fixtures is required
 # for CI, the Docker image, and anyone cloning to run the pipeline at all.
 data/*
-!data/mock_orders.json
-!data/mock_suppliers.json
-!data/contracts/
-data/contracts/*
-!data/contracts/*.txt
+!data/db/
 
 # Resolv local-only docs — personal study notes, the original planning spec, and
 # the internal fine-tuning write-up. README.md is the public-facing source of

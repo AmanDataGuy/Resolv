@@ -9,7 +9,7 @@ lora_alpha: 32
 lora_dropout: 0.05
 lora_target: q_proj,v_proj,k_proj,o_proj
 dataset: resolv_orpo
-dataset_dir: data/
+dataset_dir: data/datasets/legacy
 template: qwen
 output_dir: models/adapters/orpo/latest
 overwrite_output_dir: true

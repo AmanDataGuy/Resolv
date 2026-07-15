@@ -22,7 +22,11 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-GEMINI_MODEL_FAST = "gemini-2.0-flash"
+# Gemini 2.0 Flash was shut down 2026-06-01 and 2.5 Flash retires 2026-10-16, so the
+# live path targets 3.5 Flash (released 2026-05-19). Flash-Lite is the cheaper/faster
+# tier — useful if a high-volume caller ever needs it.
+GEMINI_MODEL_FAST = "gemini-3.5-flash"
+GEMINI_MODEL_LITE = "gemini-3.1-flash-lite"
 GROQ_MODEL = "groq/llama-3.3-70b-versatile"
 
 # Groq key rotation: litellm (the library ADK's LiteLlm wrapper calls under the
@@ -62,17 +66,24 @@ def rotate_groq_key() -> bool:
 def get_model():
     """Returns the model to pass into an ADK Agent/LlmAgent's `model=` argument.
 
-    Groq is preferred when GROQ_API_KEY is set: it's an OpenAI-compatible provider
-    reached through ADK's LiteLlm wrapper (google.adk.models.lite_llm.LiteLlm),
-    same pattern as the reference course's Module 5 openrouter_agent/ollama_agent
-    examples. Falling back to a plain "gemini-2.0-flash" string only when no Groq
-    key is configured means switching providers is a .env change, not a code change.
+    Gemini is preferred when GEMINI_API_KEY is set. ADK talks to Gemini **natively**
+    (it's Google's own SDK), so this returns a plain model-name string and litellm is
+    never imported — keeping the deployed path free of that dependency. litellm only
+    ever existed to reach Groq, which ADK doesn't support natively.
+
+    Groq (via ADK's LiteLlm wrapper) remains the fallback when no Gemini key is set.
+    That split is deliberate: Gemini is quota-limited, so it serves the LOW-volume
+    live path (2 calls per exception), while Groq's free tier absorbs the HIGH-volume
+    offline work (the eval judge in scripts/eval_finetune.py, dataset generation).
+    Provider choice stays a .env change, not a code change.
     """
+    if os.environ.get("GEMINI_API_KEY"):
+        return GEMINI_MODEL_FAST
     if _GROQ_KEYS:
         from google.adk.models.lite_llm import LiteLlm
 
         return LiteLlm(model=GROQ_MODEL)
-    return GEMINI_MODEL_FAST
+    return GEMINI_MODEL_FAST  # no key configured — fails loudly at call time
 
 
 SEND_MODE = os.environ.get("SEND_MODE", "draft")
@@ -91,5 +102,13 @@ AUTO_RESOLVE_MAX_RISK_USD = float(os.environ.get("AUTO_RESOLVE_MAX_RISK_USD", 10
 # Enforced in harness/escalation.py, not just an LLM instruction.
 NEVER_AUTO_RESOLVE_TYPES = {"quality_rejection", "supplier_failure"}
 
-MOCK_DATA_DIR = os.path.join(os.path.dirname(__file__), "data")
-CONTRACTS_DIR = os.path.join(MOCK_DATA_DIR, "contracts")
+# data/ is organised by job — each folder has exactly one:
+#   raw/       untouched Kaggle downloads (~300 MB, gitignored)
+#   db/        the demo database the harness verifies claims against — small, versioned,
+#              and the only part the running app needs (orders, suppliers, contracts)
+#   pools/     raw CSV -> filtered exception contexts (intermediate)
+#   datasets/  training + eval data (datasets/legacy = the email-drafting era)
+#   cache/     resumable generation caches (throwaway)
+DATA_DIR = os.path.join(os.path.dirname(__file__), "data")
+DB_DIR = os.path.join(DATA_DIR, "db")
+CONTRACTS_DIR = os.path.join(DB_DIR, "contracts")

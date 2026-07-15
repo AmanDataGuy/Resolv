@@ -13,9 +13,9 @@ Python if-statement now.
 import json
 from datetime import datetime, timedelta, timezone
 
-from config import MOCK_DATA_DIR
+from config import DB_DIR
 
-_SUPPLIERS_FILE = f"{MOCK_DATA_DIR}/mock_suppliers.json"
+_SUPPLIERS_FILE = f"{DB_DIR}/suppliers.json"
 
 _NEEDS_ALTERNATES = {"stockout", "supplier_failure"}
 
