@@ -217,10 +217,13 @@ __marimo__/
 # Streamlit
 .streamlit/secrets.toml
 
-# Resolv data — ignore the whole tree EXCEPT the small synthetic fixtures the app
-# needs to run (the mock DB + the contract corpus). Raw Kaggle datasets, generated
-# training sets, and model artifacts stay ignored. Shipping the fixtures is required
-# for CI, the Docker image, and anyone cloning to run the pipeline at all.
+# Resolv data — organised by job. Ignore everything EXCEPT data/db/ (the small demo
+# database the running app + harness need: orders, suppliers, contracts). The rest is
+# reproducible or huge and stays local:
+#   data/raw/       untouched Kaggle downloads (~300 MB)
+#   data/pools/     raw CSV -> filtered exception contexts
+#   data/datasets/  generated training/eval data (+ datasets/legacy)
+#   data/cache/     resumable generation caches
 data/*
 !data/db/
 

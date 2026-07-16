@@ -1,23 +1,22 @@
-"""Minimal Streamlit demo for Resolv.
+"""Resolv demo — the support-intake pipeline, live.
 
 Run:  venv\\Scripts\\streamlit run app.py
 
-Paste a raw exception event, pick which model drafts the email (Groq 70B or the local
-fine-tuned GRPO adapter), and watch the full pipeline run: detection, revenue math, SLA
-clause + retrieved contract text, the drafted email, the deterministic guardrail
-verification, and the auto/human/escalate decision.
+A customer types a messy complaint. The extractor (LLM) turns it into a typed claim; the harness
+then VERIFIES that claim against the real order record — deterministically, no LLM — and decides
+the action. The whole point on screen: the model reads, the harness decides.
 """
 import asyncio
-import json
-import os
 
 import streamlit as st
 
-from agents.orchestrator import process_exception
+from agents.extractor import extractor_agent
+from agents.runner_utils import run_agent_once
+from harness.validity import verify_claim
+from schemas import CustomerClaim
 
 st.set_page_config(page_title="Resolv", layout="centered")
 
-# --- styling: one accent (indigo), ink text, neutral greys. No emojis. ---
 st.markdown(
     """
     <style>
@@ -29,22 +28,15 @@ st.markdown(
     .block-container { max-width: 820px; padding-top: 2.2rem; }
     .r-title { font-size: 2.1rem; font-weight: 700; color: var(--ink); letter-spacing: -0.02em; }
     .r-sub { color: var(--muted); font-size: 0.95rem; margin: 0.1rem 0 1.4rem; }
-    .r-label { font-size: 0.72rem; font-weight: 600; letter-spacing: 0.06em;
-               text-transform: uppercase; color: var(--muted); margin-bottom: 0.3rem; }
-    .r-card { border: 1px solid var(--line); border-radius: 10px; padding: 1rem 1.2rem;
-              background: #fff; margin-bottom: 0.9rem; }
-    .r-email { border: 1px solid var(--line); border-left: 3px solid var(--accent);
-               border-radius: 10px; padding: 1rem 1.2rem; background: var(--panel);
-               white-space: pre-wrap; color: var(--ink); line-height: 1.5; }
-    .r-metric-v { font-size: 1.35rem; font-weight: 700; color: var(--ink); }
-    .r-metric-l { font-size: 0.72rem; color: var(--muted); text-transform: uppercase;
-                  letter-spacing: 0.05em; }
-    .r-action { font-weight: 700; color: var(--accent); }
-    .r-pass { color: var(--muted); font-weight: 600; }
-    .r-fail { color: var(--accent); font-weight: 700; }
-    .stButton>button { background: var(--accent); color: #fff; border: none; border-radius: 8px;
-                       font-weight: 600; padding: 0.5rem 1.4rem; }
-    .stButton>button:hover { background: #3730a3; color: #fff; }
+    .r-label { font-size: 0.72rem; font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase;
+               color: var(--muted); margin: 1rem 0 0.3rem; }
+    .r-card { border: 1px solid var(--line); border-radius: 10px; padding: 0.9rem 1.1rem; background: #fff;
+              margin-bottom: 0.4rem; color: var(--ink); }
+    .r-k { color: var(--muted); }
+    .r-accent { color: var(--accent); font-weight: 700; }
+    .stButton>button { background: var(--accent); color:#fff; border:none; border-radius:8px;
+                       font-weight:600; padding:0.5rem 1.4rem; }
+    .stButton>button:hover { background:#3730a3; color:#fff; }
     </style>
     """,
     unsafe_allow_html=True,
@@ -52,98 +44,69 @@ st.markdown(
 
 st.markdown("<div class='r-title'>Resolv</div>", unsafe_allow_html=True)
 st.markdown(
-    "<div class='r-sub'>Autonomous supply-chain exception manager — the LLM proposes, the harness disposes.</div>",
+    "<div class='r-sub'>Support intake that takes action — the LLM reads, the harness verifies and decides.</div>",
     unsafe_allow_html=True,
 )
 
-DEFAULT_EVENT = {
-    "id": "exc-acme-1001",
-    "source": "tms-webhook",
-    "supplier_id": "acme-logistics",
-    "order_ids": ["ORD-1001", "ORD-1002"],
-    "raw_text": (
-        "Shipment for orders ORD-1001 and ORD-1002 from acme-logistics is 6 days past "
-        "the estimated delivery date. Multiple customer escalations received."
-    ),
-}
-
-st.markdown("<div class='r-label'>Raw exception event</div>", unsafe_allow_html=True)
-raw = st.text_area("event", json.dumps(DEFAULT_EVENT, indent=2), height=210, label_visibility="collapsed")
-
-backend = st.radio(
-    "Drafter model",
-    ["Groq llama-3.3-70b", "Fine-tuned Qwen2.5-1.5B (RLVR)"],
-    horizontal=True,
+SAMPLE = (
+    "hi so i ordered something like ord-1-0-0-7 or maybe ord-1-0-0-9 i dont know i have the email "
+    "somewhere... it was supposed to arrive weeks ago and it turned up way late, i paid like 25 bucks. "
+    "by the way my other order ord-5021 still hasnt been refunded either. can someone sort this out?"
 )
-run = st.button("Process exception")
+
+st.markdown("<div class='r-label'>Customer message</div>", unsafe_allow_html=True)
+msg = st.text_area("msg", SAMPLE, height=150, label_visibility="collapsed")
+run = st.button("Process complaint")
 
 
-def _check_line(label, ok):
-    cls = "r-pass" if ok else "r-fail"
-    word = "pass" if ok else "fail"
-    return f"<div>{label}: <span class='{cls}'>{word}</span></div>"
+def _decision(f) -> tuple[str, str]:
+    if f.claim_true is True:
+        amt = f" — approve credit of ${f.amount_usd:,.2f}" if f.amount_usd else ""
+        return "auto_resolve", f"Claim verified{amt}."
+    if f.claim_true is False:
+        return "reject", "Record does not support the claim — send a polite explanation."
+    return "need_info", "Cannot identify the order — ask the customer to confirm the number."
 
 
 if run:
-    os.environ["DRAFTER_BACKEND"] = "finetuned" if "Fine-tuned" in backend else "groq"
-    try:
-        payload = json.loads(raw)
-    except json.JSONDecodeError as e:
-        st.error(f"Invalid JSON: {e}")
-        st.stop()
+    with st.spinner("Extracting and verifying..."):
+        raw = asyncio.run(run_agent_once(extractor_agent, msg, "customer_claim"))
+        claim = CustomerClaim.model_validate(raw)
+        finding = verify_claim(claim)
+    action, reason = _decision(finding)
 
-    with st.spinner("Running the pipeline..."):
-        record = asyncio.run(process_exception(payload))
-
-    impact = record["impact"]
-    sla = record["sla_findings"]
-    draft = record["draft"]
-    decision = record["decision"]
-    checks = record["draft_verification"]["checks"]
-
-    # key facts
-    c1, c2, c3 = st.columns(3)
-    c1.markdown(
-        f"<div class='r-metric-l'>Exception</div><div class='r-metric-v'>{record['type']}</div>",
-        unsafe_allow_html=True,
-    )
-    c2.markdown(
-        f"<div class='r-metric-l'>Revenue at risk</div><div class='r-metric-v'>${impact['revenue_at_risk_usd']:,.0f}</div>",
-        unsafe_allow_html=True,
-    )
-    c3.markdown(
-        f"<div class='r-metric-l'>Urgency</div><div class='r-metric-v'>{record['urgency']}</div>",
-        unsafe_allow_html=True,
-    )
-
-    # SLA
-    clause = sla.get("clause_id") or "none on file"
-    clause_text = sla.get("clause_text") or "(no contract text retrieved above the confidence threshold)"
-    st.markdown("<div class='r-label' style='margin-top:1.2rem'>SLA finding</div>", unsafe_allow_html=True)
+    st.markdown("<div class='r-label'>1 &nbsp;·&nbsp; Extracted claim (LLM)</div>", unsafe_allow_html=True)
+    stated = f" &nbsp;&nbsp; <span class='r-k'>stated:</span> ~${claim.stated_amount_usd:,.0f}" if claim.stated_amount_usd else ""
     st.markdown(
-        f"<div class='r-card'><b>Clause {clause}</b> &nbsp;·&nbsp; penalty ${sla['penalty_usd']:,.0f}"
-        f"<br><span style='color:#6b7280'>{clause_text}</span></div>",
+        f"<div class='r-card'><span class='r-k'>order:</span> <b>{claim.order_id or '(none given)'}</b>"
+        f" &nbsp;&nbsp; <span class='r-k'>type:</span> <b>{claim.claim_type}</b>{stated}"
+        f"<br><span class='r-k' style='font-size:0.8rem'>pulled from a free-form message — order numbers may be "
+        f"garbled, spelled out, or decoys</span></div>",
         unsafe_allow_html=True,
     )
 
-    # drafted email
-    st.markdown("<div class='r-label'>Drafted email</div>", unsafe_allow_html=True)
     st.markdown(
-        f"<div class='r-email'><b>Subject:</b> {draft['subject']}\n\n{draft['body']}</div>",
+        "<div class='r-label'>2 &nbsp;·&nbsp; Verification against the record (deterministic)</div>",
         unsafe_allow_html=True,
     )
-
-    # guardrail verification + decision
-    v1, v2 = st.columns(2)
-    with v1:
-        st.markdown("<div class='r-label'>Guardrail verification</div>", unsafe_allow_html=True)
-        rows = "".join(_check_line(k.replace("_", " "), ok) for k, ok in checks.items())
-        st.markdown(f"<div class='r-card'>{rows}</div>", unsafe_allow_html=True)
-    with v2:
-        st.markdown("<div class='r-label'>Decision</div>", unsafe_allow_html=True)
-        st.markdown(
-            f"<div class='r-card'><span class='r-action'>{decision['action']}</span>"
-            f" &nbsp;(confidence {decision['confidence']})"
-            f"<br><span style='color:#6b7280'>{decision['reason']}</span></div>",
-            unsafe_allow_html=True,
+    verdict = {True: "TRUE", False: "FALSE", None: "UNVERIFIABLE"}[finding.claim_true]
+    amt_line = ""
+    if claim.stated_amount_usd and finding.amount_usd and abs(claim.stated_amount_usd - finding.amount_usd) > 0.5:
+        amt_line = (
+            f"<br><span class='r-k'>customer said</span> ~${claim.stated_amount_usd:,.0f}"
+            f" &nbsp;·&nbsp; <span class='r-k'>record shows</span> <b>${finding.amount_usd:,.2f}</b>"
+            f" &nbsp;<span class='r-accent'>&larr; the harness uses the real figure, not the customer's guess</span>"
         )
+    st.markdown(
+        f"<div class='r-card'><span class='r-k'>order found:</span> <b>{finding.order_found}</b>"
+        f" &nbsp;&nbsp; <span class='r-k'>claim:</span> <span class='r-accent'>{verdict}</span>"
+        f"<br><span class='r-k'>{finding.reason}</span>{amt_line}</div>",
+        unsafe_allow_html=True,
+    )
+
+    st.markdown("<div class='r-label'>3 &nbsp;·&nbsp; Decision (harness)</div>", unsafe_allow_html=True)
+    st.markdown(
+        f"<div class='r-card'><span class='r-accent'>{action}</span><br>"
+        f"<span class='r-k'>{reason}</span></div>",
+        unsafe_allow_html=True,
+    )
