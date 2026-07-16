@@ -88,7 +88,12 @@ class EscalationDecision(BaseModel):
 # The intake side of the pipeline: a real person describes a problem in their own
 # words, and the extractor turns that into a typed claim the harness can verify.
 
-ClaimType = Literal["late_delivery", "damaged", "never_arrived", "wrong_item"]
+# The four claim types, each backed by a real Olist order_status (no fabricated types):
+#   late_delivery   — delivered after the promised date (or the customer believes so)
+#   never_arrived   — shipped but never delivered
+#   order_canceled  — the order was canceled
+#   item_unavailable— the item became unavailable after ordering
+ClaimType = Literal["late_delivery", "never_arrived", "order_canceled", "item_unavailable"]
 
 
 class CustomerClaim(BaseModel):
@@ -108,6 +113,22 @@ class CustomerClaim(BaseModel):
     order_id: str | None = None
     claim_type: ClaimType
     stated_amount_usd: float | None = None
+
+
+class ClaimFinding(BaseModel):
+    """The deterministic verdict on a customer claim — the production gate AND the RLVR
+    reward signal, computed by harness/validity.py against the order record. No LLM.
+
+    claim_true is None (not False) when the order can't be found: "can't judge" is a
+    distinct outcome from "the claim is false", and they drive different actions
+    (ask-for-info vs reject).
+    """
+
+    order_found: bool
+    claim_true: bool | None
+    reason: str
+    order_id: str | None = None
+    amount_usd: float | None = None
 
 
 class ComplaintCase(BaseModel):
