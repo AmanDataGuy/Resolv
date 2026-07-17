@@ -22,6 +22,7 @@ import re
 from pathlib import Path
 
 from datasets import Dataset
+from peft import LoraConfig
 from transformers import AutoModelForCausalLM, AutoTokenizer
 from trl import GRPOConfig, GRPOTrainer
 
@@ -95,12 +96,18 @@ def main() -> None:
         fp16=True,
         report_to="none",
     )
+    peft_config = LoraConfig(
+        r=16, lora_alpha=32, lora_dropout=0.05,
+        target_modules=["q_proj", "k_proj", "v_proj", "o_proj"],
+        task_type="CAUSAL_LM",
+    )
     trainer = GRPOTrainer(
         model=model,
         reward_funcs=[extraction_reward],
         args=config,
         train_dataset=_load_prompts(),
         processing_class=tok,
+        peft_config=peft_config,   # LoRA -> saves an adapter (matches OUT), fits a T4
     )
     trainer.train()
     trainer.save_model(OUT)

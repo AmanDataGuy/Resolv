@@ -4,7 +4,13 @@ one function, no LLM.
 A customer claims something ("my order was late", "it never arrived"). The extractor turns
 the messy message into a CustomerClaim{order_id, claim_type}. This module decides whether that
 claim is TRUE by looking the order up in the demo DB (data/db/orders.json) and checking the
-real record — dates and status. Same exact-match discipline as harness/guardrails.py.
+real record — dates and status. Exact match on the record, never a judgment call.
+
+DATE STRINGS, NOT TIMESTAMPS. `delivered > promised` below compares "YYYY-MM-DD" strings —
+lexicographic, which is correct for ISO dates and is the granularity this system reasons in.
+scripts/gen_complaint_cases.py must bucket orders the same way; it once split on the raw Olist
+timestamp instead, and 20 orders came out labelled `late` that this function scores false. Its
+_assert_verifier_agrees() now checks the two agree on every order before any case is written.
 
 Three outcomes, three actions:
   order not found      -> claim_true = None  -> ask the customer to confirm the order number
@@ -46,8 +52,6 @@ def _claim_holds(claim_type: str, order: dict) -> bool:
         return delivered is None and status == "shipped"
     if claim_type == "order_canceled":
         return status == "canceled"
-    if claim_type == "item_unavailable":
-        return status == "unavailable"
     return False
 
 

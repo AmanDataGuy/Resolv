@@ -13,9 +13,8 @@ here:
      value sits in os.environ is enough to move the next call to a different key,
      with no agent rebuild. rotate_groq_key() is called after a rate-limit error
      in agents/runner_utils.py and returns False once all keys are exhausted.
-  3. Escalation thresholds + never-auto-resolve types — the exact numbers
-     harness/escalation.py enforces, kept here so they're env-overridable and
-     visible in one spot rather than buried in the decision logic.
+  3. Policy thresholds — the exact numbers harness/policy.py enforces, kept here so
+     they're env-overridable and visible in one spot rather than buried in the rules.
 """
 import os
 from dotenv import load_dotenv
@@ -86,29 +85,39 @@ def get_model():
     return GEMINI_MODEL_FAST  # no key configured — fails loudly at call time
 
 
-SEND_MODE = os.environ.get("SEND_MODE", "draft")
+# --- Policy thresholds --------------------------------------------------------------------
+# The exact numbers harness/policy.py enforces. Here, not inline in the rules, for two reasons:
+# they're env-overridable per deployment (a company sets its own limits without a code change),
+# and a reviewer can read every business limit the system has on one screen.
+#
+# These are the ONLY knobs, and the agent can neither see nor change them. It proposes a tool
+# call; policy.py checks it against these. The agent does not decide what is allowed.
 
+# Above this, a refund needs a human. At or below, the agent may issue it unattended.
+AUTO_APPROVE_MAX_USD = float(os.environ.get("AUTO_APPROVE_MAX_USD", 200.0))
 
-def drafter_backend() -> str:
-    """Which drafter writes the email: 'groq' (default, the ADK LlmAgent) or
-    'finetuned' (the local GRPO LoRA adapter, see agents/drafter_local.py). Read at
-    call time so the Streamlit demo can flip it per request via the env var."""
-    return os.environ.get("DRAFTER_BACKEND", "groq")
+# Refund ceiling per claim type, as a fraction of what the customer actually paid.
+#   never_arrived / order_canceled — they received nothing, so a full refund is defensible.
+#   late_delivery                  — they DID receive the goods; the harm is the delay, so this
+#                                    is a goodwill credit, not a refund of the item's price.
+# Capping this in policy is what stops "so sorry, here's your money back" from being an option
+# the model can talk itself into under pressure.
+REFUND_CAP_FRACTION = {
+    "never_arrived": 1.0,
+    "order_canceled": 1.0,
+    "late_delivery": 0.25,
+}
 
-AUTO_RESOLVE_CONFIDENCE_THRESHOLD = float(os.environ.get("AUTO_RESOLVE_CONFIDENCE_THRESHOLD", 0.85))
-AUTO_RESOLVE_MAX_RISK_USD = float(os.environ.get("AUTO_RESOLVE_MAX_RISK_USD", 10000.0))
-
-# Exception types that must never auto-resolve, regardless of confidence/revenue.
-# Enforced in harness/escalation.py, not just an LLM instruction.
-NEVER_AUTO_RESOLVE_TYPES = {"quality_rejection", "supplier_failure"}
+# Claims on orders older than this are out of window — deny, regardless of merit.
+# The dataset is real 2016-2018 Olist data, so the demo clock is pinned (harness/policy.py,
+# NOW_ISO) rather than read from wall-clock, which would put every order out of window.
+CLAIM_WINDOW_DAYS = int(os.environ.get("CLAIM_WINDOW_DAYS", 90))
 
 # data/ is organised by job — each folder has exactly one:
 #   raw/       untouched Kaggle downloads (~300 MB, gitignored)
-#   db/        the demo database the harness verifies claims against — small, versioned,
-#              and the only part the running app needs (orders, suppliers, contracts)
-#   pools/     raw CSV -> filtered exception contexts (intermediate)
-#   datasets/  training + eval data (datasets/legacy = the email-drafting era)
+#   db/        the demo database the harness verifies claims against — small, versioned, and
+#              the only part the running app needs (orders.json)
+#   datasets/  training + eval data
 #   cache/     resumable generation caches (throwaway)
 DATA_DIR = os.path.join(os.path.dirname(__file__), "data")
 DB_DIR = os.path.join(DATA_DIR, "db")
-CONTRACTS_DIR = os.path.join(DB_DIR, "contracts")
