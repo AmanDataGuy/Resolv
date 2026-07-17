@@ -35,16 +35,36 @@ def lookup_order(case_id: str, order_id: str) -> str:
     Deliberately returns the REAL amount and dates. This is what lets the agent catch a customer
     who states a wrong figure: the facts are one tool call away, so there is never a reason to
     take a stated number on trust.
+
+    Recorded to the trail even though it's a read, which is a departure from "the trail is for
+    mutations". Whether the agent LOOKED BEFORE IT ACTED is the single most valuable fact about
+    a trajectory — an agent that refunds a correct amount without checking got lucky, and one
+    that checked first is doing the job. Both look identical if reads aren't written down. The
+    first end-to-end run made this obvious: the agent caught a customer's inflated $900 claim by
+    looking up the real $639.43, and the trail showed no evidence it had happened.
     """
     order = get_order(order_id)
-    if not order:
-        return f"Order {order_id} not found. Ask the customer to re-check the number."
-    return (
-        f"Order {order_id}: paid ${order['amount_usd']:.2f}, "
-        f"promised {order['promised_date']}, "
-        f"delivered {order['delivered_date'] or 'never'}, "
-        f"status {order['status']}."
+    found = bool(order)
+    if found:
+        result = (
+            f"Order {order_id}: paid ${order['amount_usd']:.2f}, "
+            f"promised {order['promised_date']}, "
+            f"delivered {order['delivered_date'] or 'never'}, "
+            f"status {order['status']}."
+        )
+    else:
+        result = f"Order {order_id} not found. Ask the customer to re-check the number."
+
+    # A synthetic decision so reads share the trail's shape. rule_id records what the read
+    # found, because "the agent looked up an order that doesn't exist" is worth being able to
+    # count. Rule 4 filters on tool == "issue_refund", so these rows can never affect it.
+    decision = Decision(
+        action="allow",
+        rule_id="lookup_hit" if found else "lookup_miss",
+        reason=f"Read order {order_id}.",
     )
+    audit.append(case_id, "lookup_order", order_id, {}, decision, found, result)
+    return result
 
 
 def issue_refund(case_id: str, order_id: str, claim_type: str, amount_usd: float) -> str:
@@ -115,6 +135,9 @@ def demo() -> None:
 
     # lookup exposes the true amount — the antidote to whatever figure the customer states
     assert f"${fresh['amount_usd']:.2f}" in lookup_order(case, oid)
+    assert audit.read(case)[-1]["rule_id"] == "lookup_hit"  # reads are evidence; they get recorded
+    assert "not found" in lookup_order(case, "ORD-999999")
+    assert audit.read(case)[-1]["rule_id"] == "lookup_miss"
 
     # An over-cap refund is refused, and the refusal is a STRING the model can act on.
     out = issue_refund(case, oid, "late_delivery", fresh["amount_usd"])
@@ -134,10 +157,12 @@ def demo() -> None:
     # Escalation is never denied.
     assert escalate_to_human(case, oid, "customer asked for a manager").startswith("Escalated")
 
+    # 2 lookups + 3 refund attempts + 1 escalation. Every call the agent could make, recorded —
+    # including the two that were refused, which are the ones worth reading.
     trail = audit.read(case)
-    assert len(trail) == 4, f"expected 4 recorded attempts, got {len(trail)}"
+    assert len(trail) == 6, f"expected 6 recorded attempts, got {len(trail)}"
     audit.clear(case)
-    print(f"tools demo OK — {len(TOOLS)} tools, every mutation policy-checked, 4 attempts recorded")
+    print(f"tools demo OK — {len(TOOLS)} tools, every mutation policy-checked, {len(trail)} attempts recorded")
 
 
 if __name__ == "__main__":
