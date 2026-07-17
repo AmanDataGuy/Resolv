@@ -1,99 +1,27 @@
-"""Shared Pydantic models — the typed contract between every stage of the pipeline.
+"""Shared Pydantic models — the typed contract between the model and the harness.
 
-Centralized in one module (rather than one schema per agent file) so the
-orchestrator, the harness, and the test suite can all import any schema without
-circular imports. These types ARE the interface: the LLM agents emit ExceptionEvent
-and ResolutionDraft via ADK's output_schema, the deterministic harness produces
-ImpactAssessment / SLAFindings / EscalationDecision, and every boundary between
-them is validated against the models here — a malformed hand-off fails loudly at
-the seam instead of silently downstream.
+Centralized in one module so the agent, the harness, and the tests can import any schema
+without circular imports. These types ARE the interface: the extractor emits CustomerClaim via
+ADK's output_schema, the deterministic harness answers with ClaimFinding, and every boundary
+between them is validated here — a malformed hand-off fails loudly at the seam instead of
+silently downstream.
+
+THE SPLIT THESE TYPES ENCODE. The model's output type carries only what a model can honestly
+know: which order, what kind of problem — things a customer actually said. It carries no dollar
+amounts, no real dates, no verdicts. Those live on ClaimFinding, which only the harness ever
+constructs. The boundary isn't a convention someone has to remember; it's the type system.
 """
-from datetime import datetime
 from typing import Literal
 
 from pydantic import BaseModel
 
-ExceptionType = Literal[
-    "late_shipment",
-    "stockout",
-    "customs_hold",
-    "quality_rejection",
-    "supplier_failure",
-    "price_dispute",
-]
-
-Urgency = Literal["critical", "high", "medium", "low"]
-
-
-class ExceptionEvent(BaseModel):
-    exception_id: str
-    exception_type: ExceptionType
-    order_ids: list[str]
-    supplier_id: str
-    product_ids: list[str] = []
-    urgency: Urgency
-    raw_context: str
-    detected_at: datetime
-    source_system: str
-
-
-class ImpactAssessment(BaseModel):
-    revenue_at_risk_usd: float
-    orders_affected: int
-    customers_affected: int
-    estimated_delay_days: int
-    sla_breach_risk: bool
-    sla_penalty_usd: float
-    severity_label: Literal["low", "medium", "high", "critical"]
-    recommended_action: str
-
-
-class SupplierContext(BaseModel):
-    contact_found: bool
-    name: str | None = None
-    contact_email: str | None = None
-    contact_phone: str | None = None
-    account_manager: str | None = None
-    product_categories: list[str] = []
-    risk_score: float | None = None
-    alternate_suppliers: list[dict] = []
-
-
-class SLAFindings(BaseModel):
-    clause_id: str | None = None
-    clause_text: str | None = None  # actual contract prose, from rag/contract_search.py
-    violation_description: str
-    penalty_usd: float
-    notification_deadline_hours: float
-    is_urgent: bool
-
-
-class ResolutionDraft(BaseModel):
-    subject: str
-    body: str
-    recipient_type: Literal["supplier", "customer", "internal"]
-    tone: Literal["firm", "empathetic", "neutral", "urgent"]
-    action_requested: str
-    follow_up_in_hours: int
-
-
-class EscalationDecision(BaseModel):
-    action: Literal["auto_resolve", "human_approval", "escalate"]
-    confidence: float
-    reason: str
-    notify_channels: list[Literal["email", "sms", "voice", "slack"]]
-
-
-# --- Customer-complaint intake (chat / email / transcript) ---------------------
-# The intake side of the pipeline: a real person describes a problem in their own
-# words, and the extractor turns that into a typed claim the harness can verify.
-
-# The four claim types, each backed by a real Olist order_status (no fabricated types):
+# The three claim types, each backed by a real Olist order_status (nothing invented):
 #   late_delivery   — delivered after the promised date (or the customer believes so)
 #   never_arrived   — shipped but never delivered
 #   order_canceled  — the order was canceled
-#   item_unavailable— the item became unavailable after ordering
-ClaimType = Literal["late_delivery", "never_arrived", "order_canceled", "item_unavailable"]
+# A fourth, item_unavailable, was dropped: Olist has only 6 such orders — too few to train on
+# and too few to measure. See SAMPLES in scripts/gen_complaint_cases.py.
+ClaimType = Literal["late_delivery", "never_arrived", "order_canceled"]
 
 
 class CustomerClaim(BaseModel):
