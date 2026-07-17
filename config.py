@@ -52,7 +52,8 @@ def groq_key_count() -> int:
 
 def rotate_groq_key() -> bool:
     """Switches to the next configured Groq key. Returns False once every key
-    has already been tried (caller should stop retrying and raise).
+    has already been tried (caller should stop retrying and raise, or wait and
+    reset_groq_key() to start the cycle again).
     """
     global _groq_key_index
     _groq_key_index += 1
@@ -60,6 +61,20 @@ def rotate_groq_key() -> bool:
         return False
     os.environ["GROQ_API_KEY"] = _GROQ_KEYS[_groq_key_index]
     return True
+
+
+def reset_groq_key() -> None:
+    """Rewinds to the first key so rotate_groq_key() can cycle again.
+
+    Exists because Groq's limit is tokens-PER-MINUTE, not a quota: exhausting every key means
+    "all of them are busy right now", not "all of them are spent". A long eval sweep must be
+    able to wait for the window to roll over and start the cycle again — without this, the first
+    minute of rate limiting would permanently burn every key for the rest of the run.
+    """
+    global _groq_key_index
+    _groq_key_index = 0
+    if _GROQ_KEYS:
+        os.environ["GROQ_API_KEY"] = _GROQ_KEYS[0]
 
 
 def get_model():
