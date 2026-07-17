@@ -5,9 +5,9 @@ escalation threshold is a config/.env change, never a code edit. Three concerns 
 here:
 
   1. Model resolution — get_model() returns what an ADK agent's `model=` expects.
-     Groq (via ADK's LiteLlm wrapper) is preferred when a GROQ_API_KEY is set,
-     falling back to Gemini otherwise. Provider choice is data, not a code branch
-     at each call site.
+     Groq (via ADK's LiteLlm wrapper) is the default; Gemini is opt-in via USE_GEMINI=1
+     and never selected just because a key is present. Provider choice is data, not a
+     code branch at each call site. See get_model() for why the default is that way round.
   2. Groq key rotation — up to three GROQ_API_KEY_* values. litellm reads
      GROQ_API_KEY from the environment fresh on every request, so rotating which
      value sits in os.environ is enough to move the next call to a different key,
@@ -65,24 +65,35 @@ def rotate_groq_key() -> bool:
 def get_model():
     """Returns the model to pass into an ADK Agent/LlmAgent's `model=` argument.
 
-    Gemini is preferred when GEMINI_API_KEY is set. ADK talks to Gemini **natively**
-    (it's Google's own SDK), so this returns a plain model-name string and litellm is
-    never imported — keeping the deployed path free of that dependency. litellm only
-    ever existed to reach Groq, which ADK doesn't support natively.
+    GROQ IS THE DEFAULT, AND GEMINI IS OPT-IN. This used to be the other way round — Gemini won
+    whenever GEMINI_API_KEY was set. That's a bad default here for a blunt reason: a key sitting
+    in .env is not consent to spend it. Every extractor call, every agent-loop step, and every
+    eval run would have quietly billed Gemini just because the key existed, and nothing in the
+    code would have said so.
 
-    Groq (via ADK's LiteLlm wrapper) remains the fallback when no Gemini key is set.
-    That split is deliberate: Gemini is quota-limited, so it serves the LOW-volume
-    live path (2 calls per exception), while Groq's free tier absorbs the HIGH-volume
-    offline work (the eval judge in scripts/eval_finetune.py, dataset generation).
-    Provider choice stays a .env change, not a code change.
+    So the rule is inverted and made explicit: Groq unless someone deliberately sets
+    USE_GEMINI=1. Preference is now a decision someone has to make, not a side effect of which
+    keys happen to be configured.
+
+    The volume argument also points this way. The eval runs each task n=5 times at temperature
+    0.7 across ~40 tasks with several tool-calling steps each — thousands of calls per sweep.
+    That belongs on Groq's free tier, not on a quota-limited paid key.
+
+    ADK talks to Gemini natively (it's Google's own SDK), so that branch returns a plain
+    model-name string and litellm is never imported. litellm only ever existed to reach Groq,
+    which ADK has no native support for.
     """
-    if os.environ.get("GEMINI_API_KEY"):
+    if os.environ.get("USE_GEMINI") == "1":
+        if not os.environ.get("GEMINI_API_KEY"):
+            raise RuntimeError("USE_GEMINI=1 but GEMINI_API_KEY is not set.")
         return GEMINI_MODEL_FAST
     if _GROQ_KEYS:
         from google.adk.models.lite_llm import LiteLlm
 
         return LiteLlm(model=GROQ_MODEL)
-    return GEMINI_MODEL_FAST  # no key configured — fails loudly at call time
+    raise RuntimeError(
+        "No GROQ_API_KEY set. Set one, or set USE_GEMINI=1 to use Gemini deliberately."
+    )
 
 
 # --- Policy thresholds --------------------------------------------------------------------

@@ -43,8 +43,11 @@ import time
 from pathlib import Path
 
 import pandas as pd
+from dotenv import load_dotenv
 from litellm import completion
 from tqdm import tqdm
+
+load_dotenv()  # this script doesn't import config, so nothing else loads .env for it
 
 DATA_DIR = Path(__file__).parent.parent / "data"
 RAW = DATA_DIR / "raw" / "olist"
@@ -242,6 +245,13 @@ def _prompt(order: dict, difficulty: str, omit: bool) -> str:
 
 def _generate(prompt: str) -> str:
     global _key_i
+    # Check explicitly rather than letting range(0) fall through to the raise below. With no
+    # keys loaded that loop runs zero times and reports "all keys exhausted" — which sent me
+    # looking at Groq's rate limits when the real cause was that .env had never been read.
+    # An error message that names the wrong cause is worse than no error message.
+    if not _GROQ_KEYS:
+        raise RuntimeError("No GROQ_API_KEY* found in the environment or .env — nothing to generate with.")
+
     for _ in range(len(_GROQ_KEYS) * 3):
         try:
             resp = completion(
