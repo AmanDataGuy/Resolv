@@ -32,14 +32,13 @@ ADK still runs the extractor, where output_schema is exactly the right tool for 
 """
 import json
 
-from litellm import completion
-
 from agents.extractor import extractor_agent
-from agents.runner_utils import run_agent_once
+from agents.runner_utils import complete, run_agent_once
 from config import GROQ_MODEL
 from harness import audit, tools
 
-MAX_STEPS = 8  # a resolution needs ~3 calls; 8 is room to recover, not room to wander
+MAX_STEPS = 12  # a resolution needs ~3 calls; with up to 3 customer turns, 12 is room to recover
+                # from a denial and answer back, not room to wander
 
 SYSTEM = """You are a customer support agent for an online retailer.
 
@@ -133,11 +132,21 @@ async def extract(message: str) -> dict:
     return await run_agent_once(extractor_agent, message, "customer_claim")
 
 
-async def run_case(case_id: str, message: str, temperature: float = 0.7) -> dict:
+async def run_case(case_id: str, message: str, temperature: float = 0.7, user=None) -> dict:
     """Resolve one complaint end to end. Returns what happened, for the UI and the eval.
 
     temperature defaults to 0.7 because the eval needs independent samples (see the module
     docstring). Pass 0.0 for a reproducible single run when demoing.
+
+    `user` makes the conversation two-sided. It's an optional callable taking the agent's reply
+    and the conversation so far, returning the customer's next message — or None when they've
+    stopped talking. Without it (the Streamlit demo, a one-shot script), the agent's first reply
+    ends the case, which is the old single-turn behaviour and still the common one.
+
+    The eval passes eval/simulator.py's customer here, and that is the whole point: an agent that
+    holds policy against one message has proved very little. The failure worth measuring is
+    getting talked out of it on the third turn, and that failure cannot happen if nothing ever
+    answers back. This parameter is where the benchmark stops being a transcript.
 
     No api_key is passed to completion(): litellm resolves GROQ_API_KEY from the environment
     fresh on every request, which is exactly what makes config.rotate_groq_key() work. Passing
@@ -161,12 +170,24 @@ async def run_case(case_id: str, message: str, temperature: float = 0.7) -> dict
     bound = _bind(case_id)
 
     for step in range(MAX_STEPS):
-        resp = completion(model=GROQ_MODEL, messages=messages, tools=TOOL_SCHEMAS, temperature=temperature)
+        resp = complete(model=GROQ_MODEL, messages=messages, tools=TOOL_SCHEMAS, temperature=temperature)
         msg = resp.choices[0].message
         messages.append(msg.model_dump())
 
         if not msg.tool_calls:
-            return {"reply": msg.content or "", "claim": claim, "steps": step + 1, "trail": audit.read(case_id)}
+            # The agent has said its piece. With no simulated customer, that ends the case.
+            reply = msg.content or ""
+            if user is None:
+                return {"reply": reply, "claim": claim, "steps": step + 1, "trail": audit.read(case_id)}
+
+            # Otherwise the customer gets to answer — and this is where they push back. None
+            # means they're satisfied or out of turns; the last thing the AGENT said is still
+            # the reply, because the customer's parting shot isn't the outcome.
+            back = user(reply, messages)
+            if back is None:
+                return {"reply": reply, "claim": claim, "steps": step + 1, "trail": audit.read(case_id)}
+            messages.append({"role": "user", "content": back})
+            continue
 
         for tc in msg.tool_calls:
             name = tc.function.name
