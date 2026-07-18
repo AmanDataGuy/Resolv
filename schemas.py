@@ -72,3 +72,34 @@ class ComplaintCase(BaseModel):
     difficulty: Literal["easy", "medium", "hard"]
     message: str
     ground_truth: CustomerClaim
+
+
+# Which human queue an escalation lands in. Kept small on purpose — a queue exists only if
+# there's something to route on it (harness/routing.py). "general" is the honest catch-all, not
+# a dumping ground: it's where a case goes when the trail doesn't say enough to route better.
+Team = Literal["billing", "logistics", "general"]
+
+
+class Ticket(BaseModel):
+    """The record handed off at the END of a case — after the agent has done what it can.
+
+    This is the "forward to a human / email the customer" step made into data. It's derived
+    DETERMINISTICALLY from the audit trail by harness/routing.py (no LLM), so what the customer
+    is told and which team is paged are facts about what actually happened, not a second opinion
+    the model could get wrong.
+
+        outcome  resolved  — a refund was issued; the ticket closes, the customer is told.
+                 escalated — handed to `team`; the ticket stays OPEN until a human acts.
+                 denied    — nothing owed; closed with an explanation.
+
+    customer_message is the body of the (mock) email the customer receives, ticket_id and all.
+    integrations/notify.py is what actually "sends" it.
+    """
+
+    ticket_id: str
+    case_id: str
+    order_id: str | None
+    outcome: Literal["resolved", "escalated", "denied"]
+    team: Team | None  # set only when outcome == "escalated"
+    status: Literal["open", "closed"]
+    customer_message: str
