@@ -4,17 +4,16 @@ One place every other module reads from, so switching LLM provider or tuning an
 escalation threshold is a config/.env change, never a code edit. Three concerns live
 here:
 
-  1. Model resolution — get_model() returns what an ADK agent's `model=` expects.
-     Groq (via ADK's LiteLlm wrapper) is the default; Gemini is opt-in via USE_GEMINI=1
-     and never selected just because a key is present. Provider choice is data, not a
-     code branch at each call site. See get_model() for why the default is that way round.
-  2. Groq key rotation — up to three GROQ_API_KEY_* values. litellm reads
-     GROQ_API_KEY from the environment fresh on every request, so rotating which
-     value sits in os.environ is enough to move the next call to a different key,
-     with no agent rebuild. rotate_groq_key() is called after a rate-limit error
-     in agents/runner_utils.py and returns False once all keys are exhausted.
-  3. Policy thresholds — the exact numbers harness/policy.py enforces, kept here so
-     they're env-overridable and visible in one spot rather than buried in the rules.
+  1. Provider + model resolution — MODEL is the litellm model string every call uses, and
+     get_model() wraps it for ADK. The active provider is chosen once (see below), so no call
+     site has a per-provider branch.
+  2. Key rotation — up to three <PROVIDER>_API_KEY_* values. litellm resolves the provider's
+     key from the environment fresh on every request, so rotating which value sits in
+     os.environ[<env var>] moves the next call to a different key with no rebuild. rotate_key()
+     is called after a rate-limit error in agents/runner_utils.py and returns False once every
+     key is exhausted.
+  3. Policy thresholds — the exact numbers harness/policy.py enforces, kept here so they're
+     env-overridable and visible in one spot rather than buried in the rules.
 """
 import os
 from dotenv import load_dotenv
@@ -26,88 +25,106 @@ load_dotenv()
 # tier — useful if a high-volume caller ever needs it.
 GEMINI_MODEL_FAST = "gemini-3.5-flash"
 GEMINI_MODEL_LITE = "gemini-3.1-flash-lite"
-GROQ_MODEL = "groq/llama-3.3-70b-versatile"
 
-# Groq key rotation: litellm (the library ADK's LiteLlm wrapper calls under the
-# hood) resolves GROQ_API_KEY from the environment fresh on every request, not
-# once at construction time. That means rotating which value sits in
-# os.environ["GROQ_API_KEY"] is enough to make the next call use a different key
-# — no need to rebuild the agent. See agents/runner_utils.py for where this gets
-# called after a rate-limit error.
-_GROQ_KEYS = [
+# --- Provider selection --------------------------------------------------------------------
+# Two hosted providers reach the same open models through litellm; the harness is deliberately
+# provider-agnostic, so which one runs a sweep is a config choice, not a code change. Each entry
+# is (default litellm model, the env var litellm reads the API key from).
+#
+#   groq       — fastest, but free tier caps at 100k tokens/DAY/org. Fine for small runs; a full
+#                200-run pass^k sweep needs ~4-6M tokens and does not fit. See EVAL_REPORT.md §4.
+#   openrouter — one API over many providers. Free (:free) models are capped at ~50 req/DAY per
+#                ACCOUNT (not per key — three keys on one account share it) and their upstream
+#                endpoints are congested. ~$10 of credit lifts this to 1000 req/day AND unlocks
+#                reliable paid model endpoints (the real unlock for a full sweep).
+#
+# Pick the best tool-calling model your budget allows via LLM_MODEL. Verified working free on
+# OpenRouter: nvidia/nemotron-3-super-120b-a12b:free. Recommended once credited:
+# meta-llama/llama-3.3-70b-instruct (continuity with the Groq runs) or deepseek/deepseek-chat.
+_PROVIDERS = {
+    "groq": ("groq/llama-3.3-70b-versatile", "GROQ_API_KEY"),
+    "openrouter": ("openrouter/nvidia/nemotron-3-super-120b-a12b:free", "OPENROUTER_API_KEY"),
+}
+
+# Explicit LLM_PROVIDER wins; otherwise prefer OpenRouter when its key is present (the user set
+# it up deliberately), else Groq. Never a silent default to a provider whose key isn't there.
+LLM_PROVIDER = (
+    os.environ.get("LLM_PROVIDER", "").lower()
+    or ("openrouter" if os.environ.get("OPENROUTER_API_KEY") else "groq")
+)
+if LLM_PROVIDER not in _PROVIDERS:
+    raise RuntimeError(f"LLM_PROVIDER={LLM_PROVIDER!r} is not one of {list(_PROVIDERS)}.")
+
+_DEFAULT_MODEL, _KEY_ENV = _PROVIDERS[LLM_PROVIDER]
+
+# The one model string every litellm call uses. Override per-run with LLM_MODEL — e.g.
+#   LLM_MODEL=openrouter/meta-llama/llama-3.3-70b-instruct python -m eval.runner
+MODEL = os.environ.get("LLM_MODEL") or _DEFAULT_MODEL
+GROQ_MODEL = _PROVIDERS["groq"][0]  # kept for callers/tests that name Groq explicitly
+
+# Key rotation over <PROVIDER>_API_KEY, _2, _3. litellm reads os.environ[_KEY_ENV] fresh each
+# request, so rotating the value there is enough to move the next call to a different key.
+_KEYS = [
     v
     for v in (
-        os.environ.get("GROQ_API_KEY"),
-        os.environ.get("GROQ_API_KEY_2"),
-        os.environ.get("GROQ_API_KEY_3"),
+        os.environ.get(_KEY_ENV),
+        os.environ.get(f"{_KEY_ENV}_2"),
+        os.environ.get(f"{_KEY_ENV}_3"),
     )
     if v
 ]
-_groq_key_index = 0
+_key_index = 0
+if _KEYS:
+    os.environ[_KEY_ENV] = _KEYS[0]  # pin to the first key so rotation has a known start
 
 
-def groq_key_count() -> int:
-    return len(_GROQ_KEYS)
+def key_count() -> int:
+    return len(_KEYS)
 
 
-def rotate_groq_key() -> bool:
-    """Switches to the next configured Groq key. Returns False once every key
-    has already been tried (caller should stop retrying and raise, or wait and
-    reset_groq_key() to start the cycle again).
+def rotate_key() -> bool:
+    """Switch to the next configured key. Returns False once every key has been tried (caller
+    stops retrying and raises, or waits and reset_key()s to start the cycle again).
     """
-    global _groq_key_index
-    _groq_key_index += 1
-    if _groq_key_index >= len(_GROQ_KEYS):
+    global _key_index
+    _key_index += 1
+    if _key_index >= len(_KEYS):
         return False
-    os.environ["GROQ_API_KEY"] = _GROQ_KEYS[_groq_key_index]
+    os.environ[_KEY_ENV] = _KEYS[_key_index]
     return True
 
 
-def reset_groq_key() -> None:
-    """Rewinds to the first key so rotate_groq_key() can cycle again.
+def reset_key() -> None:
+    """Rewind to the first key so rotate_key() can cycle again.
 
-    Exists because Groq's limit is tokens-PER-MINUTE, not a quota: exhausting every key means
-    "all of them are busy right now", not "all of them are spent". A long eval sweep must be
-    able to wait for the window to roll over and start the cycle again — without this, the first
-    minute of rate limiting would permanently burn every key for the rest of the run.
+    Rate limits are windows, not one-shot quotas: exhausting every key means "all busy right
+    now", not "all spent". A long sweep must be able to wait out the window and start the cycle
+    again — without this, the first crowded minute would permanently burn every key.
     """
-    global _groq_key_index
-    _groq_key_index = 0
-    if _GROQ_KEYS:
-        os.environ["GROQ_API_KEY"] = _GROQ_KEYS[0]
+    global _key_index
+    _key_index = 0
+    if _KEYS:
+        os.environ[_KEY_ENV] = _KEYS[0]
 
 
 def get_model():
     """Returns the model to pass into an ADK Agent/LlmAgent's `model=` argument.
 
-    GROQ IS THE DEFAULT, AND GEMINI IS OPT-IN. This used to be the other way round — Gemini won
-    whenever GEMINI_API_KEY was set. That's a bad default here for a blunt reason: a key sitting
-    in .env is not consent to spend it. Every extractor call, every agent-loop step, and every
-    eval run would have quietly billed Gemini just because the key existed, and nothing in the
-    code would have said so.
-
-    So the rule is inverted and made explicit: Groq unless someone deliberately sets
-    USE_GEMINI=1. Preference is now a decision someone has to make, not a side effect of which
-    keys happen to be configured.
-
-    The volume argument also points this way. The eval runs each task n=5 times at temperature
-    0.7 across ~40 tasks with several tool-calling steps each — thousands of calls per sweep.
-    That belongs on Groq's free tier, not on a quota-limited paid key.
-
-    ADK talks to Gemini natively (it's Google's own SDK), so that branch returns a plain
-    model-name string and litellm is never imported. litellm only ever existed to reach Groq,
-    which ADK has no native support for.
+    GEMINI IS OPT-IN, never selected just because GEMINI_API_KEY is present — a key in .env is
+    not consent to spend it. Set USE_GEMINI=1 to use it deliberately. Otherwise the active
+    provider (LLM_PROVIDER / MODEL) is wrapped for ADK via LiteLlm. ADK speaks Gemini natively,
+    so that branch returns a plain model-name string and litellm is never imported.
     """
     if os.environ.get("USE_GEMINI") == "1":
         if not os.environ.get("GEMINI_API_KEY"):
             raise RuntimeError("USE_GEMINI=1 but GEMINI_API_KEY is not set.")
         return GEMINI_MODEL_FAST
-    if _GROQ_KEYS:
+    if _KEYS:
         from google.adk.models.lite_llm import LiteLlm
 
-        return LiteLlm(model=GROQ_MODEL)
+        return LiteLlm(model=MODEL)
     raise RuntimeError(
-        "No GROQ_API_KEY set. Set one, or set USE_GEMINI=1 to use Gemini deliberately."
+        f"No {_KEY_ENV} set. Set one, or set USE_GEMINI=1 to use Gemini deliberately."
     )
 
 
