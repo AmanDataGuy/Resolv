@@ -34,7 +34,7 @@ import json
 
 from agents.extractor import extractor_agent
 from agents.runner_utils import complete, run_agent_once
-from config import GROQ_MODEL
+from config import MODEL
 from harness import audit, tools
 
 MAX_STEPS = 12  # a resolution needs ~3 calls; with up to 3 customer turns, 12 is room to recover
@@ -148,8 +148,8 @@ async def run_case(case_id: str, message: str, temperature: float = 0.7, user=No
     getting talked out of it on the third turn, and that failure cannot happen if nothing ever
     answers back. This parameter is where the benchmark stops being a transcript.
 
-    No api_key is passed to completion(): litellm resolves GROQ_API_KEY from the environment
-    fresh on every request, which is exactly what makes config.rotate_groq_key() work. Passing
+    No api_key is passed to completion(): litellm resolves the provider key from the environment
+    fresh on every request, which is exactly what makes config.rotate_key() work. Passing
     it explicitly would pin one key and silently defeat the rotation.
 
     Returns {reply, claim, steps, trail}. `trail` is the audit records this case produced —
@@ -170,7 +170,7 @@ async def run_case(case_id: str, message: str, temperature: float = 0.7, user=No
     bound = _bind(case_id)
 
     for step in range(MAX_STEPS):
-        resp = complete(model=GROQ_MODEL, messages=messages, tools=TOOL_SCHEMAS, temperature=temperature)
+        resp = complete(model=MODEL, messages=messages, tools=TOOL_SCHEMAS, temperature=temperature)
         msg = resp.choices[0].message
         messages.append(msg.model_dump())
 
