@@ -15,6 +15,7 @@ numpy==2.1.3
 pyarrow>=17,<19
 peft              # local fine-tuned drafter backend (agents/drafter_local.py)
 streamlit         # demo UI (app.py)
+opentelemetry-sdk # optional request tracing on the API (api/main.py); degrades to no-op if absent
 pytest
 pytest-asyncio
 ruff
