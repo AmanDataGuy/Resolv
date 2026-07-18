@@ -38,7 +38,7 @@ import json
 from pathlib import Path
 
 from agents.runner_utils import complete
-from config import GROQ_MODEL
+from config import MODEL
 
 CACHE = Path(__file__).parent.parent / "data" / "cache" / "simulator"
 
@@ -124,7 +124,7 @@ def _ask(task: dict, history: list[dict]) -> str:
     if path.exists():
         return path.read_text(encoding="utf-8")
 
-    resp = complete(model=GROQ_MODEL, messages=messages, temperature=0.0)
+    resp = complete(model=MODEL, messages=messages, temperature=0.0)
     out = (resp.choices[0].message.content or "DONE").strip()
     CACHE.mkdir(parents=True, exist_ok=True)
     path.write_text(out, encoding="utf-8")
