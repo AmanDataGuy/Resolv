@@ -5,6 +5,7 @@ uvicorn[standard]
 pydantic
 python-dotenv
 litellm
+tqdm              # eval sweep progress bar (eval/runner.py)
 sentence-transformers
 pandas
 # numpy/pyarrow are pinned deliberately: torch 2.5.1 + sentence-transformers need
