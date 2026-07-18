@@ -27,10 +27,12 @@ import argparse
 import asyncio
 import json
 from concurrent.futures import ThreadPoolExecutor
-from datetime import datetime, timezone
 from pathlib import Path
 
+from tqdm import tqdm
+
 from agents.loop import run_case
+from config import LLM_PROVIDER, MODEL
 from eval import simulator
 from eval.metrics import scorecard
 from eval.tasks import build_tasks
@@ -38,11 +40,15 @@ from harness import audit
 from harness.policy import check_refund
 
 OUT_DIR = Path(__file__).parent.parent / "data" / "eval"
-# Groq's rate limit is the ceiling, not the CPU — 12,000 tokens/minute per ORG, and the
-# configured keys span two orgs. One worker per org keeps the sweep near the limit without
-# spending every run's attempts fighting the other workers for the same token window. Raising
-# this makes the sweep SLOWER, not faster: past the limit each extra worker just adds backoff.
-WORKERS = 2
+# SERIAL, and this is a correctness requirement on any free tier, not a performance compromise.
+# complete() survives rate limits by reading the provider's own "try again in Ns" hint, which is
+# computed for a SINGLE caller draining the bucket; with two workers it's always an underestimate,
+# the retries burn out, and the global key-index rotation races between threads. The first sweep
+# ran WORKERS=2 and 191 of 200 runs died on rate limits. One worker makes the timing accurate and
+# the rotation single-threaded.
+# (ponytail: 1 worker; raise only alongside a paid tier with real headroom, where the race and
+# the shared-bucket math both go away.)
+WORKERS = 1
 
 
 def _grade(task: dict, trail: list[dict], steps: int) -> dict:
@@ -134,38 +140,74 @@ def _one_run(task: dict, repeat: int) -> dict:
 
 
 def main() -> None:
-    ap = argparse.ArgumentParser()
+    ap = argparse.ArgumentParser(description="Run the pass^k eval sweep. Resumable by default.")
     ap.add_argument("--n", type=int, default=5, help="repeats per task (pass^k needs n > k)")
     ap.add_argument("--tasks", type=int, default=40)
     ap.add_argument("--k", type=int, default=3)
-    ap.add_argument("--out", default=None)
+    ap.add_argument("--out", default="runs.jsonl", help="output JSONL under data/eval/ (stable name = resumable)")
+    ap.add_argument("--fresh", action="store_true", help="ignore existing rows in --out and start over")
     args = ap.parse_args()
 
     tasks = build_tasks(args.tasks)
     jobs = [(t, i) for t in tasks for i in range(args.n)]
-    print(f"{len(tasks)} tasks x {args.n} repeats = {len(jobs)} runs, {WORKERS} workers")
 
     OUT_DIR.mkdir(parents=True, exist_ok=True)
-    stamp = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")
-    out = OUT_DIR / (args.out or f"runs-{stamp}.jsonl")
+    out = OUT_DIR / args.out
 
-    rows = []
-    with ThreadPoolExecutor(max_workers=WORKERS) as pool, open(out, "w", encoding="utf-8") as f:
-        for row in pool.map(lambda j: _one_run(*j), jobs):
-            # Written as it lands, not at the end. A sweep that dies 90% through should leave 90%
-            # of its rows on disk, not nothing.
-            f.write(json.dumps(row) + "\n")
-            f.flush()
-            rows.append(row)
-            mark = "." if row["resolved"] else ("!" if row.get("unauthorized") else "x")
-            print(mark, end="", flush=True)
-    print(f"\n\nrows -> {out}\n")
+    # RESUME by default — the whole reason rows are per-case JSONL. On a free tier a sweep spans
+    # days (the daily quota only allows a fraction of it), so re-running must pick up where it
+    # stopped rather than redo completed work or, worse, start a second refund on an order rule 4
+    # would then deny. We key on (task_id, repeat): that pair IS one run, and it's what _one_run
+    # rebuilds the case_id from, so "already on disk" and "already done" are the same question.
+    #
+    # ONLY VALID runs are treated as done; a CRASHED run (has an "error", i.e. rate-limited out)
+    # is retried on the next pass. To keep that from double-counting, we rewrite the file with the
+    # valid rows only — dropping the crashed ones — before appending fresh results. So the file
+    # always holds exactly one row per completed (task_id, repeat), last attempt wins.
+    by_key: dict[tuple[str, int], dict] = {}
+    if out.exists() and not args.fresh:
+        for line in out.read_text(encoding="utf-8").splitlines():
+            if line.strip():
+                r = json.loads(line)
+                by_key[(r["task_id"], r["repeat"])] = r
+    valid = {k: r for k, r in by_key.items() if not r.get("error")}
+    pending = [(t, i) for (t, i) in jobs if (t["task_id"], i) not in valid]
 
-    card = scorecard(rows, k=args.k)
-    width = max(len(k) for k in card)
+    print(f"provider={LLM_PROVIDER}  model={MODEL}")
+    print(f"{len(tasks)} tasks x {args.n} repeats = {len(jobs)} runs | {len(valid)} done | "
+          f"{len(by_key) - len(valid)} crashed (will retry) | {len(pending)} to run | "
+          f"{WORKERS} worker(s) -> {out.name}")
+
+    resolved = unauthorized = crashed = 0
+    with open(out, "w", encoding="utf-8") as f:
+        for r in valid.values():  # keep prior good rows; crashed rows are dropped and re-attempted
+            f.write(json.dumps(r) + "\n")
+        f.flush()
+        with ThreadPoolExecutor(max_workers=WORKERS) as pool:
+            bar = tqdm(pool.map(lambda j: _one_run(*j), pending), total=len(pending), unit="run", desc="sweep")
+            for row in bar:
+                # Written as it lands, not at the end: a sweep that dies 90% through should leave
+                # 90% of its rows on disk (and resume from there next time), not nothing.
+                f.write(json.dumps(row) + "\n")
+                f.flush()
+                resolved += bool(row["resolved"])
+                unauthorized += bool(row.get("unauthorized"))
+                crashed += bool(row.get("error"))
+                bar.set_postfix(resolved=resolved, unauth=unauthorized, crashed=crashed)
+
+    # Scorecard over the FULL file — this session's rows plus every prior resumed run. The
+    # aggregate must reflect all runs on disk, never just the ones this invocation happened to do.
+    all_rows = [json.loads(l) for l in out.read_text(encoding="utf-8").splitlines() if l.strip()]
+    print(f"\nscorecard over {len(all_rows)} rows in {out.name}:\n")
+    card = scorecard(all_rows, k=args.k)
+    width = max(len(key) for key in card)
     for key, value in card.items():
         print(f"  {key:<{width}}  {value}")
 
+    n_crashed = sum(1 for r in all_rows if r.get("error"))
+    if n_crashed:
+        print(f"\n  note: {n_crashed}/{len(all_rows)} runs crashed (recorded as failures). If these are")
+        print("        rate-limit errors, the scorecard understates the agent — re-run to resume them.")
     if card["unauthorized_rate"] > 0:
         print("\n  !! UNAUTHORIZED ACTIONS OCCURRED — the enforcement claim is false. Nothing")
         print("     else on this card means anything until that number is zero.")
