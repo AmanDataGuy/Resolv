@@ -26,8 +26,14 @@ sweep ever needs to be fast rather than just not-slow.)
 import argparse
 import asyncio
 import json
+import os
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
+
+# Quiet litellm's per-call banners BEFORE it's imported (lazily, inside complete()), so the tqdm
+# bar is the only thing moving on screen during a self-run. Errors still surface — they're what
+# the crashed-count tracks — just not the provider-list spam on every retry.
+os.environ.setdefault("LITELLM_LOG", "ERROR")
 
 from tqdm import tqdm
 
