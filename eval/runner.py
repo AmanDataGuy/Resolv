@@ -38,7 +38,12 @@ os.environ.setdefault("LITELLM_LOG", "ERROR")
 from tqdm import tqdm
 
 from agents.loop import run_case
+from agents.runner_utils import tokens_used
 from config import LLM_PROVIDER, MODEL
+
+# Rough, deliberately conservative — Gemini Flash is likely cheaper. This is DISPLAY ONLY; the
+# real spend guard is --max-tokens, which needs no price assumption to be correct.
+EST_USD_PER_MTOK = 1.0
 from eval import simulator
 from eval.metrics import scorecard
 from eval.tasks import build_tasks
@@ -152,6 +157,9 @@ def main() -> None:
     ap.add_argument("--k", type=int, default=3)
     ap.add_argument("--out", default="runs.jsonl", help="output JSONL under data/eval/ (stable name = resumable)")
     ap.add_argument("--fresh", action="store_true", help="ignore existing rows in --out and start over")
+    ap.add_argument("--max-tokens", type=int, default=0,
+                    help="hard-stop once cumulative tokens exceed this (0 = no cap). A spend guard "
+                         "for when you can't watch billing: resume later to finish the rest.")
     args = ap.parse_args()
 
     tasks = build_tasks(args.tasks)
@@ -199,7 +207,16 @@ def main() -> None:
                 resolved += bool(row["resolved"])
                 unauthorized += bool(row.get("unauthorized"))
                 crashed += bool(row.get("error"))
-                bar.set_postfix(resolved=resolved, unauth=unauthorized, crashed=crashed)
+                used = tokens_used()
+                bar.set_postfix(resolved=resolved, unauth=unauthorized, crashed=crashed,
+                                ktok=used // 1000, est_usd=round(used / 1e6 * EST_USD_PER_MTOK, 2))
+                if args.max_tokens and used >= args.max_tokens:
+                    # Hard stop BEFORE the next run's calls. Rows so far are on disk; re-running
+                    # resumes from here. This is the guarantee that a no-dashboard run can't overspend.
+                    bar.close()
+                    print(f"\n  token cap hit: {used:,} >= {args.max_tokens:,}. Stopping. "
+                          f"Re-run the same command to resume the rest.")
+                    break
 
     # Scorecard over the FULL file — this session's rows plus every prior resumed run. The
     # aggregate must reflect all runs on disk, never just the ones this invocation happened to do.

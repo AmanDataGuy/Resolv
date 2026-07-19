@@ -28,6 +28,16 @@ _APP_NAME = "resolv"
 
 MAX_LLM_ATTEMPTS = 15
 
+# Cumulative tokens across every complete() call this process — a cost meter for the eval, which
+# fires thousands of calls and, on some providers (Gemini via an AQ. key), against a billing
+# account with no dashboard to watch. eval/runner.py reads this to hard-stop before a budget.
+_total_tokens = 0
+
+
+def tokens_used() -> int:
+    """Total prompt+completion tokens spent by complete() so far this process."""
+    return _total_tokens
+
 
 def _is_rate_limit_error(error: Exception) -> bool:
     """Broad match, not a specific exception class: Gemini's SDK raises its own
@@ -91,6 +101,10 @@ def complete(**kwargs):
     for attempt in range(MAX_LLM_ATTEMPTS):
         try:
             resp = completion(**kwargs)
+            global _total_tokens
+            usage = getattr(resp, "usage", None)
+            if usage is not None:
+                _total_tokens += getattr(usage, "total_tokens", 0) or 0
             if not config.rotate_key():  # move next call to the next key's bucket
                 config.reset_key()
             return resp
