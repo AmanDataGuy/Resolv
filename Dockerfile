@@ -1,28 +1,23 @@
-# Container image for the Groq-backed pipeline + Streamlit demo (CPU only).
+# Container for the Streamlit split-screen demo (app.py). CPU-only, no GPU, no model weights:
+# every LLM call goes out to a hosted provider (Groq / OpenRouter / Gemini) over the API, so the
+# image is just Python + the deps in requirements.txt. Deploy to Cloud Run / App Runner / Fargate.
 #
-# RAG runs sentence-transformers on CPU; the detector/drafter call Groq over the
-# API, so no GPU is needed. Deploy to AWS App Runner / ECS Fargate.
-#
-# The fine-tuned local backend (agents/drafter_local.py) is intentionally NOT served
-# from this image — it needs a GPU + the adapter weights. In the container, keep the
-# default DRAFTER_BACKEND=groq; serve the fine-tuned model separately (e.g. a
-# SageMaker endpoint) if you want it live.
+# The extractor fine-tune runs on Kaggle, not here — the tuned adapter is a training artifact, not
+# something this image serves. The demo drives the same pipeline the API (api/main.py) exposes.
 FROM python:3.11-slim
 
 WORKDIR /app
 
-# Install deps first so this layer caches unless requirements.txt changes.
-# Install the CPU-only torch explicitly: the default wheel bundles CUDA libraries
-# (~500 MB download, ~2 GB installed) that a CPU container never uses. The CPU wheel
-# is far smaller, and sentence-transformers then sees torch already present and won't
-# pull the big one.
+# Deps first so this layer caches unless requirements.txt changes.
 COPY requirements.txt .
-RUN pip install --no-cache-dir torch --index-url https://download.pytorch.org/whl/cpu \
- && pip install --no-cache-dir -r requirements.txt
+RUN pip install --no-cache-dir -r requirements.txt
 
-# Copy source + the small mock fixtures (.dockerignore keeps raw data / models out).
+# Source + the small versioned order DB (data/db/orders.json). .dockerignore keeps the raw
+# Kaggle downloads, training data, and caches out of the build context.
 COPY . .
 
-# GROQ_API_KEY is injected at runtime (App Runner secret / `docker run -e`), never baked in.
-EXPOSE 8501
-CMD ["streamlit", "run", "app.py", "--server.port=8501", "--server.address=0.0.0.0"]
+# The provider key is injected at runtime (Cloud Run secret / `docker run -e`), never baked in.
+# Cloud Run sets $PORT (default 8080); shell-form CMD so it expands. Streamlit binds all
+# interfaces so the platform can reach it.
+EXPOSE 8080
+CMD streamlit run app.py --server.port=${PORT:-8080} --server.address=0.0.0.0
