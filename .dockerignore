@@ -1,6 +1,5 @@
-# Keep the build context (and image) lean. The app needs only source + the small
-# mock fixtures (data/mock_*.json, data/contracts/*.txt) — everything heavy or
-# training-only is excluded here.
+# Keep the build context (and image) lean. The app needs only source + the small versioned
+# order DB (data/db/orders.json) — everything heavy, raw, or training-only is excluded here.
 .git
 .github
 venv
@@ -13,4 +12,6 @@ data/raw
 data/pools
 data/datasets
 data/cache
+data/eval
+data/outbox
 .env
