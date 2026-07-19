@@ -1,26 +1,24 @@
-"""The HTTP surface — one endpoint that runs a complaint end to end.
+"""The web API for Resolv — one HTTP endpoint that runs a customer complaint end to end.
 
-    uvicorn api.main:app --reload      then POST /resolve  {"message": "..."}
+Run it locally with:
 
-WHAT IT WIRES. This is the production path the demo and any real caller share: take a raw
-customer message, run the agent loop (agents/loop.py), route the finished trail to a ticket
-(harness/routing.py), send it (integrations/notify.py), and return everything that happened. The
-endpoint itself holds no business logic — every decision was made and enforced downstream, and
-this just orchestrates the four steps and reports them.
+    uvicorn api.main:app --reload
 
-TEMPERATURE 0 HERE, unlike the eval. The eval samples at 0.7 because pass^k needs independent
-attempts; a real customer wants the most reliable single answer, so the API defaults to
-deterministic. Same code, different knob — which is the whole reason temperature is a parameter
-on run_case rather than a constant.
+Then open http://127.0.0.1:8000/docs to try it in the browser, or POST to /resolve.
 
-OBSERVABILITY. Each /resolve is wrapped in an OpenTelemetry span carrying the outcome, team, and
-step count — the fields you actually page on. OTel is OPTIONAL: if the packages aren't installed
-the tracer degrades to a no-op and the endpoint still works. (ponytail: console exporter, no
-collector — a real deployment points OTEL_EXPORTER_OTLP_ENDPOINT at one and this code doesn't
-change.)
+WHAT THIS FILE IS. This is the thin "front door" of the system. It has NO business logic of its
+own — it just wires four steps together in order:
+
+    1. run_case()       the agent reads the complaint and calls tools   (agents/loop.py)
+    2. routing.route()  turn the finished case into a ticket + team      (harness/routing.py)
+    3. notify.send()    "email" the customer and page the team           (integrations/notify.py)
+    4. return           hand the whole thing back as JSON
+
+Every real decision (was the refund allowed? how much? which team?) is made and enforced in those
+modules, not here. Keeping the endpoint dumb is the point: there is nothing here to get wrong, so
+the API can never approve something the harness wouldn't.
 """
 import uuid
-from contextlib import contextmanager
 
 from fastapi import FastAPI
 from pydantic import BaseModel
@@ -29,88 +27,70 @@ from agents.loop import run_case
 from harness import routing
 from integrations import notify
 
-# --- Optional OpenTelemetry ----------------------------------------------------------------
-# Wired if present, no-op if not. A demo shouldn't hard-depend on a tracing stack, and a real
-# deployment shouldn't have to strip one out — so it's detected, not required.
-try:
-    from opentelemetry import trace
-    from opentelemetry.sdk.trace import TracerProvider
-    from opentelemetry.sdk.trace.export import BatchSpanProcessor, ConsoleSpanExporter
-
-    _provider = TracerProvider()
-    _provider.add_span_processor(BatchSpanProcessor(ConsoleSpanExporter()))
-    trace.set_tracer_provider(_provider)
-    _tracer = trace.get_tracer("resolv")
-    _OTEL = True
-except Exception:  # ImportError, or any SDK init failure — never let telemetry break serving
-    _tracer = None
-    _OTEL = False
+# Create the app. The title/description show up on the auto-generated /docs page.
+app = FastAPI(
+    title="Resolv",
+    description="A customer-refund agent that can only act inside a policy harness.",
+)
 
 
-@contextmanager
-def _span(name: str, **attrs):
-    """Start a span if OTel is available, else do nothing. Keeps the handler free of `if _OTEL`."""
-    if not _tracer:
-        yield None
-        return
-    with _tracer.start_as_current_span(name) as span:
-        for k, v in attrs.items():
-            if v is not None:
-                span.set_attribute(k, v)
-        yield span
-
-
-app = FastAPI(title="Resolv", description="Deduction-recovery support agent with a policy harness.")
-
-
-class ComplaintIn(BaseModel):
+# The shape of the request body. FastAPI reads the incoming JSON and checks it against this
+# automatically — if "message" is missing, the caller gets a clear 422 error instead of a crash.
+class Complaint(BaseModel):
     message: str
-    case_id: str | None = None  # caller may supply one; otherwise we mint a fresh trail id
 
 
 @app.get("/health")
 def health() -> dict:
-    return {"status": "ok", "otel": _OTEL}
+    """A tiny endpoint to check the server is alive — handy for deploys and uptime checks."""
+    return {"status": "ok"}
 
 
 @app.post("/resolve")
-async def resolve(body: ComplaintIn) -> dict:
-    """Run one complaint: agent loop -> ticket -> notify. Returns reply, ticket, and the trail.
+async def resolve(complaint: Complaint) -> dict:
+    """Resolve one complaint and return everything that happened.
 
-    The trail is returned in full on purpose — it's the evidence for what the agent did, and a
-    caller that wants to trust the reply can check it against the record instead of the prose.
+    It's `async def` because run_case() is asynchronous (the agent awaits the language model).
+    FastAPI handles the await for us, so a caller just POSTs and waits for the JSON back.
     """
-    case_id = body.case_id or f"api-{uuid.uuid4().hex[:12]}"
-    with _span("resolve", case_id=case_id) as span:
-        result = await run_case(case_id, body.message, temperature=0.0)
-        ticket = routing.route(case_id, result["trail"], result["claim"])
-        sent = notify.send(ticket)
-        if span:
-            span.set_attribute("outcome", ticket.outcome)
-            span.set_attribute("steps", result["steps"])
-            if ticket.team:
-                span.set_attribute("team", ticket.team)
+    # A unique id for this case. It names the audit trail this run reads and writes, so two
+    # customers never share history. Generated here, never taken from the caller.
+    case_id = f"api-{uuid.uuid4().hex[:8]}"
 
+    # Step 1 — run the agent. temperature=0.0 makes it deterministic: the same complaint gives the
+    # same answer. (The eval uses 0.7 to get varied samples; a live customer wants the single most
+    # reliable answer.)
+    result = await run_case(case_id, complaint.message, temperature=0.0)
+
+    # Step 2 — read the finished audit trail and decide the ticket (refund / escalate / deny) and,
+    # if escalated, which team. Pure and deterministic — no second call to the model.
+    ticket = routing.route(case_id, result["trail"], result["claim"])
+
+    # Step 3 — deliver it: write the customer email and, if escalated, page the team.
+    # (Mocked to files under data/outbox/ — see integrations/notify.py.)
+    notify.send(ticket)
+
+    # Step 4 — return everything. `trail` is included on purpose: it's the evidence for what the
+    # agent actually did, so a caller can trust the record instead of the prose reply.
     return {
         "case_id": case_id,
-        "reply": result["reply"],
-        "claim": result["claim"],
-        "ticket": ticket.model_dump(),
-        "delivered": sent,
-        "trail": result["trail"],
+        "reply": result["reply"],       # what to say to the customer, in plain language
+        "claim": result["claim"],       # what intake read the message as (order id + claim type)
+        "ticket": ticket.model_dump(),  # outcome, team, ticket id, customer message
+        "trail": result["trail"],       # every tool call and the policy verdict on each
     }
 
 
 def _selfcheck() -> None:
-    """No-network check: the app builds and /health answers. The /resolve path needs a live model,
-    so it's exercised by the eval and the demo, not here.
+    """One no-network check: the app builds and /health answers. The /resolve path needs a live
+    model, so it's exercised by the demo and the eval, not here. Run: python -m api.main
     """
     from fastapi.testclient import TestClient
 
     client = TestClient(app)
     r = client.get("/health")
-    assert r.status_code == 200 and r.json()["status"] == "ok"
-    print(f"api selfcheck OK — /health responds, otel={_OTEL}")
+    assert r.status_code == 200 and r.json() == {"status": "ok"}
+    print("api selfcheck OK — /health responds")
 
 
 if __name__ == "__main__":
