@@ -30,13 +30,21 @@ MAX_LLM_ATTEMPTS = 15
 
 # Cumulative tokens across every complete() call this process — a cost meter for the eval, which
 # fires thousands of calls and, on some providers (Gemini via an AQ. key), against a billing
-# account with no dashboard to watch. eval/runner.py reads this to hard-stop before a budget.
-_total_tokens = 0
+# account with no dashboard to watch. Prompt and completion are tracked SEPARATELY because output
+# tokens cost multiples of input (Gemini 3.5 Flash ~6x), so a real dollar estimate must weigh them
+# apart — lumping them into one per-token rate is exactly the mismatch that under-counted earlier.
+_prompt_tokens = 0
+_completion_tokens = 0
 
 
 def tokens_used() -> int:
     """Total prompt+completion tokens spent by complete() so far this process."""
-    return _total_tokens
+    return _prompt_tokens + _completion_tokens
+
+
+def tokens_split() -> tuple[int, int]:
+    """(prompt, completion) tokens — kept apart so callers can price output higher than input."""
+    return _prompt_tokens, _completion_tokens
 
 
 def _is_rate_limit_error(error: Exception) -> bool:
@@ -101,10 +109,11 @@ def complete(**kwargs):
     for attempt in range(MAX_LLM_ATTEMPTS):
         try:
             resp = completion(**kwargs)
-            global _total_tokens
+            global _prompt_tokens, _completion_tokens
             usage = getattr(resp, "usage", None)
             if usage is not None:
-                _total_tokens += getattr(usage, "total_tokens", 0) or 0
+                _prompt_tokens += getattr(usage, "prompt_tokens", 0) or 0
+                _completion_tokens += getattr(usage, "completion_tokens", 0) or 0
             if not config.rotate_key():  # move next call to the next key's bucket
                 config.reset_key()
             return resp

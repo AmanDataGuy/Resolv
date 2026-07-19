@@ -38,12 +38,20 @@ os.environ.setdefault("LITELLM_LOG", "ERROR")
 from tqdm import tqdm
 
 from agents.loop import run_case
-from agents.runner_utils import tokens_used
+from agents.runner_utils import tokens_split, tokens_used
 from config import LLM_PROVIDER, MODEL
 
-# Rough, deliberately conservative — Gemini Flash is likely cheaper. This is DISPLAY ONLY; the
-# real spend guard is --max-tokens, which needs no price assumption to be correct.
-EST_USD_PER_MTOK = 1.0
+# Gemini 3.5 Flash list price (global tier — the higher published end, so est_usd reads as a
+# conservative CEILING: your real bill should be <= what's shown). Output is ~6x input, which is
+# why the earlier single flat rate under-counted. Override for a different provider/tier.
+USD_PER_MTOK_IN = 1.50
+USD_PER_MTOK_OUT = 9.00
+
+
+def est_usd() -> float:
+    """Estimated dollars spent this process, pricing prompt and completion tokens separately."""
+    prompt, completion = tokens_split()
+    return prompt / 1e6 * USD_PER_MTOK_IN + completion / 1e6 * USD_PER_MTOK_OUT
 from eval import simulator
 from eval.metrics import scorecard
 from eval.tasks import build_tasks
@@ -209,7 +217,7 @@ def main() -> None:
                 crashed += bool(row.get("error"))
                 used = tokens_used()
                 bar.set_postfix(resolved=resolved, unauth=unauthorized, crashed=crashed,
-                                ktok=used // 1000, est_usd=round(used / 1e6 * EST_USD_PER_MTOK, 2))
+                                ktok=used // 1000, est_usd=round(est_usd(), 2))
                 if args.max_tokens and used >= args.max_tokens:
                     # Hard stop BEFORE the next run's calls. Rows so far are on disk; re-running
                     # resumes from here. This is the guarantee that a no-dashboard run can't overspend.
