@@ -75,7 +75,16 @@ This is the heart of the project: not "can the agent resolve a complaint," but *
 - **The answer key is derived from the policy engine** ([`eval/tasks.py`](eval/tasks.py)), not written down — so the benchmark can never drift out of sync with the system it grades. Tasks are sampled to a verified 50/50 split, so no constant policy ("deny everything") beats a coin flip.
 - **Grading replays the trail against policy** ([`eval/runner.py`](eval/runner.py)): for every successful refund, `check_refund()` is re-run over the prior history to independently confirm it was allowed. `unauthorized_rate` **must be 0** — nonzero means the enforcement claim is false and nothing else on the scorecard matters.
 
-The benchmark is built and green; a full pass^k sweep is throughput-bound on free LLM tiers. Status, methodology, and results live in **[EVAL_REPORT.md](EVAL_REPORT.md)**. Indicative smoke signal so far: **pass² 0.80, unauthorized 0.0** on the completed runs — the agent recovers under pressure and never acts outside policy.
+**Headline result** — a balanced 200-run sweep (40 tasks × 5 repeats) on Gemini 3.5 Flash:
+
+| metric | value | reading |
+|---|---|---|
+| **pass³** | **0.97** | reliably correct across repeats, not lucky once |
+| **unauthorized_rate** | **0.0** | zero refunds outside policy in 200 adversarial runs |
+| over_block_rate | 0.01 | the only 2 misses — and both erred toward *not* paying |
+| resolve_rate | 0.99 | (Wilson CI 0.964–0.997) |
+
+The tasks are a verified 50/50 refund/deny split, so "deny everything" scores 0.50 — the numbers are earned, not degenerate. And the two errors in 200 runs were both *over-blocks*: the agent denied someone owed money, never paid someone who wasn't. That asymmetry is exactly what a refund system should fail toward. Full methodology, per-tactic breakdown, and run history in **[EVAL_REPORT.md](EVAL_REPORT.md)**.
 
 ---
 
@@ -83,7 +92,9 @@ The benchmark is built and green; a full pass^k sweep is throughput-bound on fre
 
 The fine-tune target is the **extractor** ([`agents/extractor.py`](agents/extractor.py)) — the one task where a model genuinely has headroom (recovering *which* order and *what* problem from an emotional ramble, where the order number may be spelled out, typo'd, or a decoy). Its reward is [`harness/validity.py`](harness/validity.py) — the *same deterministic verifier* that gates production — so it's **RLVR, not RLHF**: no LLM judge, one definition of "got the facts right," used in training and at run time.
 
-Sequencing is deliberate: establish a trustworthy benchmark and a **baseline** first, then fine-tune, then re-run the *same* sweep. The fine-tune is judged by pass^k — a better extractor → better first tool calls → higher reliability — not by its own training curve.
+**Result** (Qwen2.5-1.5B, LoRA, GRPO via TRL, on Kaggle): held-out both-fields-correct extraction accuracy **0.489 → 0.707 (+0.217)** — order-id 0.761→0.783, claim-type 0.609→0.870. Judged on a held-out split, never the training set. The near-zero GRPO loss is *expected*, not a collapse: GRPO advantages are mean-zero by construction, so the loss reads ~0 while the policy still learns — which is exactly why the fine-tune is judged by held-out accuracy, not the loss curve.
+
+Sequencing is deliberate: establish a trustworthy benchmark and a **baseline** first, then fine-tune, then judge the improvement. The reward is the deterministic verifier, so "better" means "more claims that pass the same check production enforces" — not a preference a judge model happened to hold.
 
 ---
 
@@ -96,7 +107,7 @@ Sequencing is deliberate: establish a trustworthy benchmark and a **baseline** f
 | **Harness** | Deterministic Python — policy, tools, audit, validity, routing (no API key needed to test) |
 | **Data** | 460 orders + complaints derived from real **Olist** deliveries; ground truth known before the message exists |
 | **Eval** | pass^k estimator, geometric-mean trajectory scoring, Wilson intervals, McNemar — pure math, no LLM |
-| **API / UI** | FastAPI `/resolve` (+ optional OpenTelemetry) · Streamlit split-screen demo (customer ⟷ audit trail) |
+| **API / UI** | FastAPI `/resolve` · Streamlit split-screen demo (customer ⟷ audit trail) |
 | **Validation** | Pydantic v2 schemas ([`schemas.py`](schemas.py)) shared across agent, harness, eval, and tests |
 
 ---
