@@ -6,14 +6,11 @@ pydantic
 python-dotenv
 litellm
 tqdm              # eval sweep progress bar (eval/runner.py)
-sentence-transformers
-pandas
-# numpy/pyarrow are pinned deliberately: torch 2.5.1 + sentence-transformers need
-# numpy 2.1.x and a matching pyarrow build. Newer numpy (2.4+, e.g. what streamlit
-# pulls unpinned) segfaults the native sentence-transformers encode on import.
+pandas            # scripts/gen_complaint_cases.py reads the raw Olist CSVs
+# numpy/pyarrow pinned to a known-good pandas build. (Legacy from the removed torch stack;
+# kept because the newer numpy streamlit pulls unpinned has caused pyarrow conflicts here.)
 numpy==2.1.3
 pyarrow>=17,<19
-peft              # local fine-tuned drafter backend (agents/drafter_local.py)
 streamlit         # demo UI (app.py)
 opentelemetry-sdk # optional request tracing on the API (api/main.py); degrades to no-op if absent
 pytest
