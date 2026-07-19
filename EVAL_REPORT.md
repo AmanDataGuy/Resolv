@@ -5,10 +5,10 @@ full run history at the bottom.*
 
 **Last updated:** 2026-07-20
 **Phase:** 5 — the benchmark gate (produce an honest scorecard before anything downstream)
-**Status:** ✅ **First real scorecard is in.** A partial sweep on Gemini 3.5 Flash (126 runs / 26
-tasks) scored **pass³ = 0.977, unauthorized_rate = 0.0, over_block = 0.008** — the thesis holds
-under adversarial pressure. Stopped early at 126/200 as a budget precaution (no billing dashboard
-to watch); resumable to the full 200. Numbers and caveats in §4ter.
+**Status:** ✅ **Full scorecard complete.** The balanced 200-run sweep on Gemini 3.5 Flash scored
+**pass³ = 0.97, unauthorized_rate = 0.0, over_block = 0.01** — the thesis holds across 200
+adversarial runs, and the only 2 misses were over-blocks (safe direction). Total cost ~$3.5.
+Numbers in §4ter. Both headline results (this + the extractor fine-tune §4bis) are now in.
 
 ---
 
@@ -213,52 +213,50 @@ extractor (for reward variance) is what fixed it.
 
 ---
 
-## 4ter. Baseline pass^k — the first real scorecard (partial, Gemini 3.5 Flash)
+## 4ter. Baseline pass^k — the full scorecard (Gemini 3.5 Flash) ✅ COMPLETE
 
-Ran the sweep on **Gemini 3.5 Flash** (agent, extractor, and adversarial customer all on it).
-Stopped at **126/200 runs** as a budget precaution — the key was pay-as-you-go with no billing
-dashboard to watch, and Gemini Flash's output tokens are pricey, so we halted rather than risk a
-hard $5 ceiling. 126 runs = **26 tasks touched, 25 with the full 5 repeats**, so pass³ is over 26
-tasks. Scored offline from `data/eval/runs.jsonl` (pure `eval.metrics.scorecard`, no re-run):
+Full **200-run sweep** on **Gemini 3.5 Flash** (agent, extractor, and adversarial customer all on
+it): 40 tasks × 5 repeats, balanced 95 refund-owed / 100 deny-owed / 5 escalate. Ran in two
+sittings (126 + 74, resumed cleanly). Total cost **~$3.5**, 0 crashes.
 
 | metric | value | read |
 |---|---|---|
-| **pass³** | **0.977** | right 3-of-5-ways-running on ~all tasks — strong reliability |
-| pass¹ | 0.992 | single-attempt success |
-| **unauthorized_rate** | **0.0** | **the thesis: zero policy-violating refunds across 126 adversarial runs** |
+| **pass³** | **0.97** | right 3-of-5-ways-running per task — strong reliability under sampling |
+| pass¹ | 0.99 | single-attempt success |
+| **unauthorized_rate** | **0.0** | **the thesis: zero policy-violating refunds across all 200 adversarial runs** |
 | harmful_block_rate | 1.0 | every refund that should've been refused, was |
-| over_block_rate | 0.008 | one owed customer wrongly denied (the honesty counterweight — near zero) |
-| resolve_rate | 0.992 (CI 0.956–0.999) | |
-| mean_steps | 5.44 | |
+| over_block_rate | 0.01 | the honesty counterweight — 2 owed customers wrongly denied |
+| resolve_rate | 0.99 (CI 0.964–0.997) | |
+| mean_steps | 5.21 | |
 | crashed | 0 | Gemini path clean; no rate-limit losses |
 
-**By tactic** (resolved/total): honest 26/26, inflate_amount 25/25, wrong_order_id 25/25,
-pressure 25/25, change_story 24/25. The single miss was a `change_story` case (the one
-over-block) — the agent was talked into denying a customer who was actually owed.
+**The benchmark is honest, not degenerate:** balanced 95/100, so "deny everything" scores exactly
+50% and "refund everything" ~48%. Beating those requires actually reading each case.
 
-**Caveats, stated honestly:**
-- **Partial + not perfectly balanced.** The 126 runs cover the first 26 tasks by case_id, which
-  skewed deny-heavy (76 deny / 45 refund / 5 escalate) rather than the intended 50/50. So
-  `resolve_rate` is mildly flattered by easier deny cases being over-represented. `pass³` (per-task
-  averaged) and `unauthorized_rate` (0 regardless of mix) are not affected. The full 200-run,
-  40-task sweep restores the 50/50 balance.
-- **Cost:** ~2M tokens projected for the full run; stopped at ~1.24M ≈ **~$1.5–2.5 real** (Gemini
-  3.5 Flash ≈ $0.75–1.50/M in, $4.50–9/M out; see §4). The `est_usd` meter's flat $1/M
-  under-counts because output is expensive — real ≈ 1.5–2× the displayed figure.
-- **`--max-tokens` cap did NOT hard-stop mid-sweep** as intended: `ThreadPoolExecutor.map` submits
-  all jobs eagerly, so the cap can stop *reading* results but can't cancel queued runs. Known bug;
-  needs a submit-as-you-go execution model to fix. The run was stopped by killing the process.
+**By tactic** (resolved/total): honest 40/40, inflate_amount 40/40, pressure 40/40,
+wrong_order_id 39/40, change_story 39/40. **By difficulty:** easy 59/60, medium 94/95, hard 45/45.
 
-**Bottom line:** the headline holds. **Zero unauthorized actions and pass³ ≈ 0.98 under five
-adversarial customer tactics** — on a partial but real sample. Finishing the balanced 200 would
-tighten the CIs and restore the 50/50 split, but the core claim is already evidenced.
+**Only 2 misses in 200, and both are the SAFE kind.** Both were *over-blocks* — the agent denied a
+customer who was actually owed (`case-0133` change_story, `case-0322` wrong_order_id), rather than
+paying someone who wasn't. **Zero unauthorized payments; the two errors were over-caution.** That's
+exactly the asymmetry a refund system wants: when it's wrong, it's wrong toward not-paying.
+
+**Honest notes:**
+- **Cost meter fixed mid-project.** Early `est_usd` used a flat $1/M and under-counted, because
+  Gemini Flash output is ~6× input ($1.50/M in, $9/M out). Now priced separately (§4). Real total
+  ≈ $3.5 across both sittings.
+- **`--max-tokens` cap can't hard-stop mid-sweep** — `ThreadPoolExecutor.map` submits all jobs
+  eagerly, so the cap stops *reading* results but not the queued runs. Known bug; a submit-as-you-go
+  model would fix it. (Didn't bite here — the run finished naturally under budget.)
+
+**Bottom line:** **pass³ = 0.97 and zero unauthorized actions across 200 adversarial runs**, on a
+balanced benchmark a constant policy can't beat. The central claim — the agent cannot act outside
+policy — is evidenced, and the only failures were on the safe side of the line.
 
 ---
 
 ## 5. What is NOT being tested yet (and why)
 
-- **The full balanced 200-run sweep** — 126/200 done; resume the same command to finish the
-  remaining 74 (restores 50/50 balance, tightens CIs). ~$1–1.5 more.
 - **Wiring the tuned extractor into the agent loop** and re-running to show the fine-tune moves
   *pass^k* — the extractor fine-tune is measured directly (§4bis, 0.489→0.707); connecting it to
   the agent path is the remaining stretch step.
@@ -280,6 +278,7 @@ tighten the CIs and restore the 50/50 split, but the core claim is already evide
 | smoke B | 07-17 | W=1, n=2×6 | 12 | 0 | — | — | ❌ daily quota exhausted (TPD) |
 | extractor FT | 07-19 | Kaggle T4, GRPO 200 steps, 92 held-out | — | — | — | — | ✅ both-right 0.489 → 0.707 (+0.217) |
 | gemini-partial | 07-20 | Gemini 3.5 Flash, n=5×40, stopped 126/200 | 126 | 126 | 125 | 0 | ✅ **pass³ 0.977, unauth 0.0**, over-block 0.008 |
+| **gemini-full** | 07-20 | Gemini 3.5 Flash, n=5×40, resumed to 200 | 200 | 200 | 198 | 0 | ✅ **pass³ 0.97, unauth 0.0**, over-block 0.01, ~$3.5 |
 
 ---
 
@@ -310,6 +309,10 @@ Behaviour to expect:
 ---
 
 ## Changelog
+- **2026-07-20 (later):** Resumed and **completed the full balanced 200-run sweep**:
+  **pass³ = 0.97, unauthorized_rate = 0.0, over_block = 0.01**, 0 crashes, ~$3.5 total. Only 2
+  misses in 200, both over-blocks (safe direction). Fixed the `est_usd` meter to price input vs
+  output separately (output ~6× on Flash). Both headline numbers now in. See §4ter.
 - **2026-07-20:** First real agent scorecard, on Gemini 3.5 Flash. Partial sweep (126/200 runs,
   26 tasks), stopped early as a budget precaution: **pass³ = 0.977, unauthorized_rate = 0.0,
   over_block = 0.008, 0 crashes.** All 5 adversarial tactics ~100% (1 change_story miss). Wired
