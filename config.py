@@ -44,6 +44,11 @@ GEMINI_MODEL_LITE = "gemini-3.1-flash-lite"
 _PROVIDERS = {
     "groq": ("groq/llama-3.3-70b-versatile", "GROQ_API_KEY"),
     "openrouter": ("openrouter/nvidia/nemotron-3-super-120b-a12b:free", "OPENROUTER_API_KEY"),
+    # Gemini via litellm's Google AI Studio path (needs an AIza-prefixed key, not an AQ. Vertex
+    # one). Pay-as-you-go, no minimum deposit — a full sweep is ~$1-3 of real usage on Flash.
+    # OPT-IN ONLY: selected solely by LLM_PROVIDER=gemini, never auto-detected, so a Gemini key
+    # sitting in .env is never spent without an explicit choice (the standing "ask first" rule).
+    "gemini": ("gemini/gemini-3.5-flash", "GEMINI_API_KEY"),
 }
 
 # Explicit LLM_PROVIDER wins; otherwise prefer OpenRouter when its key is present (the user set
