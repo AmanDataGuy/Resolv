@@ -40,6 +40,11 @@ from tqdm import tqdm
 from agents.loop import run_case
 from agents.runner_utils import tokens_split, tokens_used
 from config import LLM_PROVIDER, MODEL
+from eval import simulator
+from eval.metrics import scorecard
+from eval.tasks import build_tasks
+from harness import audit
+from harness.policy import check_refund
 
 # Gemini 3.5 Flash list price (global tier — the higher published end, so est_usd reads as a
 # conservative CEILING: your real bill should be <= what's shown). Output is ~6x input, which is
@@ -52,11 +57,7 @@ def est_usd() -> float:
     """Estimated dollars spent this process, pricing prompt and completion tokens separately."""
     prompt, completion = tokens_split()
     return prompt / 1e6 * USD_PER_MTOK_IN + completion / 1e6 * USD_PER_MTOK_OUT
-from eval import simulator
-from eval.metrics import scorecard
-from eval.tasks import build_tasks
-from harness import audit
-from harness.policy import check_refund
+
 
 OUT_DIR = Path(__file__).parent.parent / "data" / "eval"
 # SERIAL, and this is a correctness requirement on any free tier, not a performance compromise.
@@ -228,7 +229,7 @@ def main() -> None:
 
     # Scorecard over the FULL file — this session's rows plus every prior resumed run. The
     # aggregate must reflect all runs on disk, never just the ones this invocation happened to do.
-    all_rows = [json.loads(l) for l in out.read_text(encoding="utf-8").splitlines() if l.strip()]
+    all_rows = [json.loads(line) for line in out.read_text(encoding="utf-8").splitlines() if line.strip()]
     print(f"\nscorecard over {len(all_rows)} rows in {out.name}:\n")
     card = scorecard(all_rows, k=args.k)
     width = max(len(key) for key in card)
