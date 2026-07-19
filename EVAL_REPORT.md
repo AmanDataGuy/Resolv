@@ -186,11 +186,38 @@ keys directly:
 
 ---
 
+## 4bis. Extractor fine-tune (RLVR) — DONE, and it worked
+
+Ran `scripts/train_extractor.py` on Kaggle (T4, Qwen2.5-1.5B + LoRA, GRPO via TRL, 200 steps,
+368 train / 92 held-out). Reward = the production verifier's exact-match check, no LLM judge.
+
+| metric (held-out, n=92) | base | tuned | Δ |
+|---|---|---|---|
+| order id correct | 0.761 | 0.783 | +0.022 |
+| claim type correct | 0.609 | **0.870** | **+0.261** |
+| **both right** | **0.489** | **0.707** | **+0.217** |
+
++0.217 at n=92 is ~4× the standard error — a real gain, not noise. Order extraction was already
+strong; the fine-tune's work was on claim-type classification (and emitting the label in the
+parseable form the reward wants, which is exactly the production requirement).
+
+**The reported training loss was `0.000000` for all 200 steps — and this time that is EXPECTED,
+not the collapse.** GRPO's scalar loss is ~0 by construction: advantages are normalized mean-zero
+within each group, so `loss ≈ -mean(A_i) ≈ 0` while the per-completion gradients are still
+nonzero. Last fine-tune, loss=0 came with a flat held-out metric (genuine zero-advantage
+collapse: all rollouts scored identically, `std=0`, gradient truly zero). This time loss=0 came
+with +21.7 pts held-out — proof the gradients flowed. The lesson, now load-bearing: **judge GRPO
+by held-out accuracy, never by the loss curve.** Switching the target from the drafter to the
+extractor (for reward variance) is what fixed it.
+
+---
+
 ## 5. What is NOT being tested yet (and why)
 
-- **The RLVR fine-tune of the extractor** (`scripts/train_extractor.py`) — deliberately sequenced
-  *after* this benchmark. The whole point is to judge the fine-tune by pass^k, so the benchmark
-  must be trustworthy first. The extractor currently runs off the pre-pivot adapter.
+- **Baseline pass^k of the full agent** — still throughput-blocked (§4). The extractor fine-tune
+  above is measured directly (extraction accuracy); wiring the tuned adapter into the agent loop
+  and re-running the sweep to show it moves *pass^k* is the remaining step, and needs the funded
+  eval run.
 - **Legacy training data** (`data/datasets/legacy/`: `resolv_sft.json`, `resolv_orpo.json`,
   `eval_drafts.json`) — belongs to the deleted email-drafter product. Kept only so it isn't
   confused with live data; safe to delete.
@@ -207,6 +234,7 @@ keys directly:
 | smoke A | 07-17 | W=2, n=2×5 | 10 | 10 | 8 | 0 | ✅ valid, pass^2 0.80 |
 | sweep-01 | 07-17 | W=2, n=5×40 | 200 | 9 | 9 | 0 | ❌ throughput; 191 rate-limit crashes |
 | smoke B | 07-17 | W=1, n=2×6 | 12 | 0 | — | — | ❌ daily quota exhausted (TPD) |
+| extractor FT | 07-19 | Kaggle T4, GRPO 200 steps, 92 held-out | — | — | — | — | ✅ both-right 0.489 → 0.707 (+0.217) |
 
 ---
 
@@ -237,7 +265,11 @@ Behaviour to expect:
 ---
 
 ## Changelog
-- **turn 7 (this turn):** Wired OpenRouter as a second provider — `config.py` is now
+- **2026-07-19:** Ran the extractor RLVR fine-tune on Kaggle. Held-out extraction accuracy
+  **0.489 → 0.707 both-right** (+0.217; claim-type 0.609 → 0.870). Training loss `0.000000`
+  throughout is expected GRPO behaviour (mean-zero advantages), NOT the earlier collapse — the
+  held-out gain proves gradients flowed. See §4bis.
+- **turn 7:** Wired OpenRouter as a second provider — `config.py` is now
   provider-agnostic (`LLM_PROVIDER`/`LLM_MODEL`, generic `rotate_key`/`reset_key`/`key_count`);
   `loop.py`, `simulator.py`, `runner_utils.py` updated. Tested the 3 keys (valid, one free
   account, ~50 req/day shared; free 70B/qwen endpoints congested; **nemotron-120b:free works**).
