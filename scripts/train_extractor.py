@@ -17,7 +17,9 @@ Runs on Kaggle (GPU). Kaggle cell:
 
 Output: models/adapters/extractor/latest
 """
+import glob
 import json
+import random
 import re
 from pathlib import Path
 
@@ -28,8 +30,24 @@ from trl import GRPOConfig, GRPOTrainer
 
 BASE = "Qwen/Qwen2.5-1.5B-Instruct"
 OUT = "models/adapters/extractor/latest"
-CASES = Path("data/datasets/complaint_cases.json")
-CLAIM_TYPES = ["late_delivery", "never_arrived", "order_canceled", "item_unavailable"]
+TEST_FRACTION = 0.2   # held out of training; the accuracy we print is measured only on these
+SEED = 0
+
+
+def _find_cases() -> Path:
+    """complaint_cases.json, wherever it lives. On Kaggle it's under /kaggle/input/<dataset>/;
+    locally it's in the repo. Checked in that order so the same file runs in both places."""
+    for hit in glob.glob("/kaggle/input/**/complaint_cases.json", recursive=True):
+        return Path(hit)
+    return Path("data/datasets/complaint_cases.json")
+
+
+CASES = _find_cases()
+# Must mirror schemas.ClaimType exactly — the training prompt has to offer the same claim types
+# the harness accepts, or the fine-tune learns a label the verifier will always reject. Hardcoded
+# (not imported from schemas) because this script is meant to run standalone in a Kaggle/Colab
+# notebook where the repo isn't installed. item_unavailable was dropped; keep these three in sync.
+CLAIM_TYPES = ["late_delivery", "never_arrived", "order_canceled"]
 
 INSTRUCTION = (
     "Extract the order number and the claim type from this customer message.\n"
@@ -38,7 +56,7 @@ INSTRUCTION = (
 )
 
 
-def _load_prompts() -> Dataset:
+def _all_rows() -> list[dict]:
     rows = []
     for c in json.loads(CASES.read_text()):
         gt = c["ground_truth"]
@@ -49,7 +67,16 @@ def _load_prompts() -> Dataset:
                 "claim_type_gt": gt["claim_type"],
             }
         )
-    return Dataset.from_list(rows)
+    return rows
+
+
+def _split(rows: list[dict]) -> tuple[list[dict], list[dict]]:
+    """Deterministic train/test split. The test rows are held out of training entirely, so the
+    accuracy we print is on messages the model never saw — the only kind of number worth a CV."""
+    shuffled = list(rows)
+    random.Random(SEED).shuffle(shuffled)
+    n_test = int(len(shuffled) * TEST_FRACTION)
+    return shuffled[n_test:], shuffled[:n_test]  # (train, test)
 
 
 def _parse_order(text: str) -> str:
@@ -80,9 +107,37 @@ def extraction_reward(completions, order_id_gt, claim_type_gt, **kwargs) -> list
     return rewards
 
 
+def measure(model, tok, rows: list[dict]) -> dict:
+    """Extraction accuracy on held-out rows — order id, claim type, and both-right. Greedy decode,
+    the same parse the reward uses. This is THE number: run it on the base model and again on the
+    tuned one, on messages neither was trained on, and the delta is what RLVR bought."""
+    model.eval()
+    order_ok = type_ok = both_ok = 0
+    for r in rows:
+        enc = tok(r["prompt"], return_tensors="pt").to(model.device)
+        out = model.generate(**enc, max_new_tokens=40, do_sample=False, pad_token_id=tok.eos_token_id)
+        text = tok.decode(out[0][enc.input_ids.shape[1]:], skip_special_tokens=True)
+        o = _parse_order(text).lower() == r["order_id_gt"].lower()
+        t = _parse_type(text) == r["claim_type_gt"]
+        order_ok += o
+        type_ok += t
+        both_ok += o and t
+    n = len(rows)
+    return {"order": order_ok / n, "type": type_ok / n, "both": both_ok / n, "n": n}
+
+
 def main() -> None:
     tok = AutoTokenizer.from_pretrained(BASE)
+    if tok.pad_token is None:
+        tok.pad_token = tok.eos_token
     model = AutoModelForCausalLM.from_pretrained(BASE, dtype="float16", device_map="cuda")
+
+    train_rows, test_rows = _split(_all_rows())
+    print(f"cases: {CASES}  |  {len(train_rows)} train / {len(test_rows)} held-out")
+
+    # Baseline BEFORE any training — the model has never seen these messages and isn't tuned yet.
+    base = measure(model, tok, test_rows)
+    print(f"BASE   order={base['order']:.3f}  type={base['type']:.3f}  both={base['both']:.3f}")
 
     config = GRPOConfig(
         output_dir=OUT,
@@ -105,12 +160,17 @@ def main() -> None:
         model=model,
         reward_funcs=[extraction_reward],
         args=config,
-        train_dataset=_load_prompts(),
+        train_dataset=Dataset.from_list(train_rows),   # train split only; test rows held out
         processing_class=tok,
         peft_config=peft_config,   # LoRA -> saves an adapter (matches OUT), fits a T4
     )
     trainer.train()
     trainer.save_model(OUT)
+
+    # The same held-out messages, now through the tuned model. The delta is the result.
+    tuned = measure(trainer.model, tok, test_rows)
+    print(f"TUNED  order={tuned['order']:.3f}  type={tuned['type']:.3f}  both={tuned['both']:.3f}")
+    print(f"Δ both-right = {tuned['both'] - base['both']:+.3f}   (n={base['n']} held-out messages)")
     print(f"extractor adapter saved to {OUT}")
 
 
