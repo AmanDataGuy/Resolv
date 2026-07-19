@@ -33,7 +33,6 @@ claim_type: what the customer is complaining about — exactly one of:
   late_delivery     — it arrived (or they believe it arrived) later than promised
   never_arrived     — it shipped but never showed up; they're still waiting
   order_canceled    — their order was canceled
-  item_unavailable  — the item was unavailable / out of stock after they ordered
 
 Do not judge whether the claim is true — only extract what the customer is asserting. The
 verification happens elsewhere.
