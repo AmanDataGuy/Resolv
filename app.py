@@ -1,15 +1,25 @@
-"""Resolv demo — the agent and the harness, side by side.
+"""Resolv demo — the customer's view and the machinery, side by side.
 
-Run:  venv\\Scripts\\streamlit run app.py
+Run it with:
 
-A customer types a messy complaint. The LEFT panel is what the customer experiences: the agent's
-reply and the email it sends. The RIGHT panel is what actually happened underneath: every tool
-call the model proposed, and the policy verdict the harness returned on each one. The split is
-the whole thesis on one screen — the model proposes, the harness disposes, and the two are never
-the same column.
+    streamlit run app.py
+
+WHAT YOU SEE. The screen is split into two columns, and that split IS the whole idea of the
+project:
+
+    LEFT  — "What the customer sees": the agent's reply and the ticket/email they get back.
+    RIGHT — "What happened inside": every tool the agent called and the policy verdict on each.
+
+The customer only ever sees polite prose. The right column is the truth underneath it — and
+nothing on the left can happen without a row on the right, because the harness checks every
+action before it runs. So the two columns can never disagree, and you can watch the agent get
+told "no" by policy in real time.
+
+STYLE. Deliberately plain: Streamlit's default light theme and font, native components, no custom
+CSS. The point is the flow, not the decoration.
 
 This runs the real pipeline (agents/loop.py -> harness/routing.py -> integrations/notify.py) at
-temperature 0.0, so what you see is what the API would do.
+temperature 0.0, so what you see here is exactly what the API in api/main.py would return.
 """
 import asyncio
 import uuid
@@ -20,111 +30,105 @@ from agents.loop import run_case
 from harness import audit, routing
 from integrations import notify
 
+# `layout="wide"` gives the two columns room to breathe. Everything else is Streamlit's default
+# light theme and standard sans-serif font — no styling of our own.
 st.set_page_config(page_title="Resolv", layout="wide")
 
-st.markdown(
-    """
-    <style>
-    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
-    html, body, [class*="css"], .stMarkdown, textarea, input, button {
-        font-family: 'Inter', -apple-system, 'Segoe UI', Roboto, sans-serif !important;
-    }
-    :root { --ink:#1f2937; --accent:#4338ca; --muted:#6b7280; --line:#e5e7eb;
-            --ok:#047857; --deny:#b91c1c; --esc:#b45309; }
-    .block-container { max-width: 1150px; padding-top: 2rem; }
-    .r-title { font-size: 2.1rem; font-weight: 700; color: var(--ink); letter-spacing: -0.02em; }
-    .r-sub { color: var(--muted); font-size: 0.95rem; margin: 0.1rem 0 1.2rem; }
-    .r-label { font-size: 0.72rem; font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase;
-               color: var(--muted); margin: 1rem 0 0.4rem; }
-    .r-card { border: 1px solid var(--line); border-radius: 10px; padding: 0.8rem 1rem; background: #fff;
-              margin-bottom: 0.5rem; color: var(--ink); font-size: 0.9rem; }
-    .r-k { color: var(--muted); }
-    .r-badge { font-size: 0.68rem; font-weight: 700; letter-spacing: 0.04em; text-transform: uppercase;
-               padding: 0.1rem 0.5rem; border-radius: 6px; color: #fff; }
-    .b-allow { background: var(--ok); } .b-deny { background: var(--deny); } .b-esc { background: var(--esc); }
-    .b-read { background: var(--muted); }
-    .r-reply { border-left: 3px solid var(--accent); padding: 0.6rem 0.9rem; background: #f8fafc;
-               border-radius: 0 8px 8px 0; color: var(--ink); }
-    .r-tid { font-weight: 700; color: var(--accent); }
-    .stButton>button { background: var(--accent); color:#fff; border:none; border-radius:8px;
-                       font-weight:600; padding:0.5rem 1.4rem; }
-    .stButton>button:hover { background:#3730a3; color:#fff; }
-    </style>
-    """,
-    unsafe_allow_html=True,
+st.title("Resolv")
+st.caption(
+    "A refund agent that can only act inside a policy harness. "
+    "Left: what the customer sees. Right: what policy actually enforced."
 )
 
-st.markdown("<div class='r-title'>Resolv</div>", unsafe_allow_html=True)
-st.markdown(
-    "<div class='r-sub'>The model proposes, the harness disposes. Left: what the customer sees. "
-    "Right: what policy actually enforced.</div>",
-    unsafe_allow_html=True,
-)
-
+# A messy, realistic complaint to start with. It lies about the amount ($900) and mangles the
+# order number — exactly the kind of input the harness is built to handle safely.
 SAMPLE = (
-    "hi so i ordered something like ord-1-0-0-0, it turned up way late and honestly ruined a gift. "
-    "i paid like 900 dollars for it and i want a full refund for the trouble. this is unacceptable."
+    "hi so i ordered something like ord-1-0-0-0, it turned up way late and honestly ruined a "
+    "gift. i paid like 900 dollars for it and i want a full refund for the trouble."
 )
 
-msg = st.text_area("Customer message", SAMPLE, height=120)
-run = st.button("Resolve complaint")
-
-_ACTION_BADGE = {"allow": "b-allow", "deny": "b-deny", "escalate": "b-esc"}
+message = st.text_area("Customer message", SAMPLE, height=120)
+go = st.button("Resolve complaint")
 
 
-def _badge(rec: dict) -> str:
-    # Reads (lookup_order) carry a synthetic allow but aren't a decision — show them as neutral.
-    if rec["tool"] == "lookup_order":
-        return "b-read"
-    return _ACTION_BADGE.get(rec["action"], "b-read")
+def show_trail_row(record: dict) -> None:
+    """Draw one line of the audit trail, colour-coded by what policy decided.
+
+    We reuse Streamlit's built-in coloured boxes instead of custom CSS: green = allowed,
+    red = denied, orange = sent to a human, blue = a read (looking an order up isn't a decision).
+    """
+    tool = record["tool"]
+    rule = record["rule_id"]
+    reason = record["reason"]
+
+    # A refund attempt is worth showing the amount for; other tools aren't.
+    amount = ""
+    if tool == "issue_refund":
+        amount = f" — ${record['args'].get('amount_usd', 0):.2f}"
+
+    line = f"**{tool}**{amount}  ·  `{rule}`\n\n{reason}"
+
+    if tool == "lookup_order":
+        st.info(line)                       # a read — neutral, not a decision
+    elif record["action"] == "allow":
+        st.success(line)                    # policy let it through
+    elif record["action"] == "deny":
+        st.error(line)                      # policy refused it
+    else:
+        st.warning(line)                    # policy sent it to a human (escalate)
 
 
-if run and msg.strip():
+# Only do work when the button is pressed and there's actually a message.
+if go and message.strip():
+    # A fresh case id per run, so each demo starts from an empty audit trail.
     case_id = f"demo-{uuid.uuid4().hex[:8]}"
     audit.clear(case_id)
+
     with st.spinner("Running the agent against the policy harness..."):
-        result = asyncio.run(run_case(case_id, msg, temperature=0.0))
+        # The real pipeline, same three calls the API makes.
+        result = asyncio.run(run_case(case_id, message, temperature=0.0))
         ticket = routing.route(case_id, result["trail"], result["claim"])
         notify.send(ticket)
 
     left, right = st.columns(2, gap="large")
 
+    # ---- LEFT: what the customer experiences -------------------------------------------------
     with left:
-        st.markdown("<div class='r-label'>What the customer sees</div>", unsafe_allow_html=True)
+        st.subheader("What the customer sees")
+
+        # What intake THOUGHT the message meant. It's only a hint — the agent still has to look
+        # the order up and verify it, which is the whole reason a wrong guess here is harmless.
         claim = result["claim"]
-        st.markdown(
-            f"<div class='r-card'><span class='r-k'>intake read:</span> order "
-            f"<b>{claim.get('order_id') or '(none)'}</b>, claim <b>{claim.get('claim_type') or '(unclear)'}</b>"
-            f"<br><span class='r-k' style='font-size:0.8rem'>a hint the agent must verify, not trust</span></div>",
-            unsafe_allow_html=True,
-        )
-        st.markdown("<div class='r-label'>Agent reply</div>", unsafe_allow_html=True)
-        st.markdown(f"<div class='r-reply'>{result['reply']}</div>", unsafe_allow_html=True)
-
-        st.markdown("<div class='r-label'>Email sent to customer</div>", unsafe_allow_html=True)
-        badge = {"resolved": "b-allow", "escalated": "b-esc", "denied": "b-deny"}[ticket.outcome]
-        team = f" &nbsp;→&nbsp; <b>{ticket.team}</b> team" if ticket.team else ""
-        st.markdown(
-            f"<div class='r-card'><span class='r-tid'>{ticket.ticket_id}</span> "
-            f"<span class='r-badge {badge}'>{ticket.outcome}</span>{team}"
-            f"<br><br>{ticket.customer_message}</div>",
-            unsafe_allow_html=True,
+        st.write(
+            f"Intake read this as: order **{claim.get('order_id') or '(none)'}**, "
+            f"claim **{claim.get('claim_type') or '(unclear)'}** — a hint the agent must verify, "
+            "not trust."
         )
 
+        st.markdown("**Agent reply**")
+        st.info(result["reply"])
+
+        st.markdown("**Ticket / email sent to the customer**")
+        # Colour the ticket the same way as a decision: resolved = green, escalated = orange,
+        # denied = red.
+        summary = f"{ticket.ticket_id} · {ticket.outcome}"
+        if ticket.team:
+            summary += f" · routed to the {ticket.team} team"
+        body = f"{summary}\n\n{ticket.customer_message}"
+        if ticket.outcome == "resolved":
+            st.success(body)
+        elif ticket.outcome == "escalated":
+            st.warning(body)
+        else:
+            st.error(body)
+
+    # ---- RIGHT: what actually happened underneath --------------------------------------------
     with right:
-        st.markdown("<div class='r-label'>Audit trail — every action, policy-checked</div>", unsafe_allow_html=True)
-        for rec in result["trail"]:
-            args = ""
-            if rec["tool"] == "issue_refund":
-                args = f" &nbsp;<span class='r-k'>${rec['args'].get('amount_usd', 0):.2f}</span>"
-            st.markdown(
-                f"<div class='r-card'><b>{rec['tool']}</b>{args} "
-                f"<span class='r-badge {_badge(rec)}'>{rec['rule_id']}</span>"
-                f"<br><span class='r-k'>{rec['reason']}</span></div>",
-                unsafe_allow_html=True,
-            )
-        st.markdown(
-            "<div class='r-sub' style='margin-top:0.6rem'>Nothing on the left happened without a "
-            "row on the right. That's the point — the reply is prose, the trail is the truth.</div>",
-            unsafe_allow_html=True,
+        st.subheader("What happened inside")
+        st.caption("Every action the agent took, and the policy verdict on each.")
+        for record in result["trail"]:
+            show_trail_row(record)
+        st.caption(
+            "Nothing on the left happened without a row here. The reply is prose; the trail is "
+            "the truth."
         )
