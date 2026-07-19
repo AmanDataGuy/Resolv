@@ -3,11 +3,12 @@
 *A living document. Updated every working turn. Newest findings at the top of each section;
 full run history at the bottom.*
 
-**Last updated:** 2026-07-17, turn 7 of the eval build
+**Last updated:** 2026-07-20
 **Phase:** 5 — the benchmark gate (produce an honest scorecard before anything downstream)
-**Status:** ⚙️ **Provider-agnostic; wired to OpenRouter and ready to run.** The eval now runs on
-Groq *or* OpenRouter via one config switch, with a resumable runner and a tqdm progress bar. A
-full sweep still needs paid throughput on either provider (§4); the command to run it is in §7.
+**Status:** ✅ **First real scorecard is in.** A partial sweep on Gemini 3.5 Flash (126 runs / 26
+tasks) scored **pass³ = 0.977, unauthorized_rate = 0.0, over_block = 0.008** — the thesis holds
+under adversarial pressure. Stopped early at 126/200 as a budget precaution (no billing dashboard
+to watch); resumable to the full 200. Numbers and caveats in §4ter.
 
 ---
 
@@ -212,12 +213,55 @@ extractor (for reward variance) is what fixed it.
 
 ---
 
+## 4ter. Baseline pass^k — the first real scorecard (partial, Gemini 3.5 Flash)
+
+Ran the sweep on **Gemini 3.5 Flash** (agent, extractor, and adversarial customer all on it).
+Stopped at **126/200 runs** as a budget precaution — the key was pay-as-you-go with no billing
+dashboard to watch, and Gemini Flash's output tokens are pricey, so we halted rather than risk a
+hard $5 ceiling. 126 runs = **26 tasks touched, 25 with the full 5 repeats**, so pass³ is over 26
+tasks. Scored offline from `data/eval/runs.jsonl` (pure `eval.metrics.scorecard`, no re-run):
+
+| metric | value | read |
+|---|---|---|
+| **pass³** | **0.977** | right 3-of-5-ways-running on ~all tasks — strong reliability |
+| pass¹ | 0.992 | single-attempt success |
+| **unauthorized_rate** | **0.0** | **the thesis: zero policy-violating refunds across 126 adversarial runs** |
+| harmful_block_rate | 1.0 | every refund that should've been refused, was |
+| over_block_rate | 0.008 | one owed customer wrongly denied (the honesty counterweight — near zero) |
+| resolve_rate | 0.992 (CI 0.956–0.999) | |
+| mean_steps | 5.44 | |
+| crashed | 0 | Gemini path clean; no rate-limit losses |
+
+**By tactic** (resolved/total): honest 26/26, inflate_amount 25/25, wrong_order_id 25/25,
+pressure 25/25, change_story 24/25. The single miss was a `change_story` case (the one
+over-block) — the agent was talked into denying a customer who was actually owed.
+
+**Caveats, stated honestly:**
+- **Partial + not perfectly balanced.** The 126 runs cover the first 26 tasks by case_id, which
+  skewed deny-heavy (76 deny / 45 refund / 5 escalate) rather than the intended 50/50. So
+  `resolve_rate` is mildly flattered by easier deny cases being over-represented. `pass³` (per-task
+  averaged) and `unauthorized_rate` (0 regardless of mix) are not affected. The full 200-run,
+  40-task sweep restores the 50/50 balance.
+- **Cost:** ~2M tokens projected for the full run; stopped at ~1.24M ≈ **~$1.5–2.5 real** (Gemini
+  3.5 Flash ≈ $0.75–1.50/M in, $4.50–9/M out; see §4). The `est_usd` meter's flat $1/M
+  under-counts because output is expensive — real ≈ 1.5–2× the displayed figure.
+- **`--max-tokens` cap did NOT hard-stop mid-sweep** as intended: `ThreadPoolExecutor.map` submits
+  all jobs eagerly, so the cap can stop *reading* results but can't cancel queued runs. Known bug;
+  needs a submit-as-you-go execution model to fix. The run was stopped by killing the process.
+
+**Bottom line:** the headline holds. **Zero unauthorized actions and pass³ ≈ 0.98 under five
+adversarial customer tactics** — on a partial but real sample. Finishing the balanced 200 would
+tighten the CIs and restore the 50/50 split, but the core claim is already evidenced.
+
+---
+
 ## 5. What is NOT being tested yet (and why)
 
-- **Baseline pass^k of the full agent** — still throughput-blocked (§4). The extractor fine-tune
-  above is measured directly (extraction accuracy); wiring the tuned adapter into the agent loop
-  and re-running the sweep to show it moves *pass^k* is the remaining step, and needs the funded
-  eval run.
+- **The full balanced 200-run sweep** — 126/200 done; resume the same command to finish the
+  remaining 74 (restores 50/50 balance, tightens CIs). ~$1–1.5 more.
+- **Wiring the tuned extractor into the agent loop** and re-running to show the fine-tune moves
+  *pass^k* — the extractor fine-tune is measured directly (§4bis, 0.489→0.707); connecting it to
+  the agent path is the remaining stretch step.
 - **Legacy training data** (`data/datasets/legacy/`: `resolv_sft.json`, `resolv_orpo.json`,
   `eval_drafts.json`) — belongs to the deleted email-drafter product. Kept only so it isn't
   confused with live data; safe to delete.
@@ -235,6 +279,7 @@ extractor (for reward variance) is what fixed it.
 | sweep-01 | 07-17 | W=2, n=5×40 | 200 | 9 | 9 | 0 | ❌ throughput; 191 rate-limit crashes |
 | smoke B | 07-17 | W=1, n=2×6 | 12 | 0 | — | — | ❌ daily quota exhausted (TPD) |
 | extractor FT | 07-19 | Kaggle T4, GRPO 200 steps, 92 held-out | — | — | — | — | ✅ both-right 0.489 → 0.707 (+0.217) |
+| gemini-partial | 07-20 | Gemini 3.5 Flash, n=5×40, stopped 126/200 | 126 | 126 | 125 | 0 | ✅ **pass³ 0.977, unauth 0.0**, over-block 0.008 |
 
 ---
 
@@ -265,6 +310,11 @@ Behaviour to expect:
 ---
 
 ## Changelog
+- **2026-07-20:** First real agent scorecard, on Gemini 3.5 Flash. Partial sweep (126/200 runs,
+  26 tasks), stopped early as a budget precaution: **pass³ = 0.977, unauthorized_rate = 0.0,
+  over_block = 0.008, 0 crashes.** All 5 adversarial tactics ~100% (1 change_story miss). Wired
+  Gemini as an opt-in provider; added a token meter + est-cost display. Found the `--max-tokens`
+  cap can't hard-stop under `ThreadPoolExecutor.map` (eager submit). See §4ter.
 - **2026-07-19:** Ran the extractor RLVR fine-tune on Kaggle. Held-out extraction accuracy
   **0.489 → 0.707 both-right** (+0.217; claim-type 0.609 → 0.870). Training loss `0.000000`
   throughout is expected GRPO behaviour (mean-zero advantages), NOT the earlier collapse — the
