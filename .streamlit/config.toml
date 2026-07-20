@@ -1,0 +1,13 @@
+# Pins the demo's appearance so it looks the same for every viewer.
+#
+# Streamlit otherwise follows the browser/OS theme, which means a reviewer on dark mode sees a
+# different page than the one that was designed. base="light" fixes that. The font is the stock
+# sans-serif stack — deliberately standard, because the demo should read as an instrument panel,
+# not a brand.
+[theme]
+base = "light"
+font = "sans serif"
+
+[server]
+# The demo takes typed input; no need to phone home with usage stats.
+gatherUsageStats = false
