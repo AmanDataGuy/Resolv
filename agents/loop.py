@@ -132,30 +132,26 @@ async def extract(message: str) -> dict:
     return await run_agent_once(extractor_agent, message, "customer_claim")
 
 
-async def run_case(case_id: str, message: str, temperature: float = 0.7, user=None) -> dict:
-    """Resolve one complaint end to end. Returns what happened, for the UI and the eval.
+async def run_case_events(case_id: str, message: str, temperature: float = 0.7, user=None):
+    """The resolution loop as a stream of events — one implementation, two consumers.
 
-    temperature defaults to 0.7 because the eval needs independent samples (see the module
-    docstring). Pass 0.0 for a reproducible single run when demoing.
+    run_case() below drains this and returns only the final result (what the eval and the API
+    want). The Streamlit demo consumes the events themselves and renders each as it happens, so
+    the trajectory appears live instead of all at once. Keeping it as ONE generator is the point:
+    the demo and the graded eval run the exact same code, so what a reviewer watches step by step
+    is the same thing the benchmark scored — not a parallel "for show" path that could drift.
 
-    `user` makes the conversation two-sided. It's an optional callable taking the agent's reply
-    and the conversation so far, returning the customer's next message — or None when they've
-    stopped talking. Without it (the Streamlit demo, a one-shot script), the agent's first reply
-    ends the case, which is the old single-turn behaviour and still the common one.
+    Events are plain dicts keyed by "type":
+      intake       {claim}          the extractor's read (a hint, still to be verified)
+      tool_call    {name, args}     the agent proposes a tool call
+      tool_result  {record}         the audit record that call produced (policy's verdict)
+      reply        {reply}          the agent speaks to the customer in plain text
+      done         {result}         final {reply, claim, steps, trail} — always last
 
-    The eval passes eval/simulator.py's customer here, and that is the whole point: an agent that
-    holds policy against one message has proved very little. The failure worth measuring is
-    getting talked out of it on the third turn, and that failure cannot happen if nothing ever
-    answers back. This parameter is where the benchmark stops being a transcript.
-
-    No api_key is passed to completion(): litellm resolves the provider key from the environment
-    fresh on every request, which is exactly what makes config.rotate_key() work. Passing
-    it explicitly would pin one key and silently defeat the rotation.
-
-    Returns {reply, claim, steps, trail}. `trail` is the audit records this case produced —
-    that's what the eval grades. The prose reply is for the human.
+    See run_case() for why temperature defaults to 0.7 and why no api_key is passed.
     """
     claim = await extract(message)
+    yield {"type": "intake", "claim": claim}
 
     # The extraction is context, not instruction. It's offered as a hint and the agent still has
     # to confirm it with lookup_order — the extractor is a 1.5B model reading a rambling human
@@ -175,37 +171,79 @@ async def run_case(case_id: str, message: str, temperature: float = 0.7, user=No
         messages.append(msg.model_dump())
 
         if not msg.tool_calls:
-            # The agent has said its piece. With no simulated customer, that ends the case.
+            # The agent has said its piece.
             reply = msg.content or ""
+            yield {"type": "reply", "reply": reply}
+            done = {"reply": reply, "claim": claim, "steps": step + 1, "trail": audit.read(case_id)}
+
+            # With no simulated customer, that ends the case.
             if user is None:
-                return {"reply": reply, "claim": claim, "steps": step + 1, "trail": audit.read(case_id)}
+                yield {"type": "done", "result": done}
+                return
 
             # Otherwise the customer gets to answer — and this is where they push back. None
             # means they're satisfied or out of turns; the last thing the AGENT said is still
             # the reply, because the customer's parting shot isn't the outcome.
             back = user(reply, messages)
             if back is None:
-                return {"reply": reply, "claim": claim, "steps": step + 1, "trail": audit.read(case_id)}
+                yield {"type": "done", "result": done}
+                return
             messages.append({"role": "user", "content": back})
             continue
 
         for tc in msg.tool_calls:
             name = tc.function.name
             try:
-                result = bound[name](**json.loads(tc.function.arguments))
+                args = json.loads(tc.function.arguments)
             except Exception as e:
-                # A malformed call is the model's mistake to recover from, not a crash. Hand the
-                # error back as the tool result and let it retry — same reasoning as a policy
-                # denial being a result rather than an exception (see harness/tools.py).
+                # A malformed argument list is the model's mistake to recover from, not a crash.
+                yield {"type": "tool_call", "name": name, "args": {}}
                 result = f"Tool error: {e}"
+            else:
+                yield {"type": "tool_call", "name": name, "args": args}
+                try:
+                    result = bound[name](**args)
+                except Exception as e:
+                    # Same reasoning as a policy denial being a result rather than an exception
+                    # (see harness/tools.py): hand the error back and let the model retry.
+                    result = f"Tool error: {e}"
             messages.append({"role": "tool", "tool_call_id": tc.id, "name": name, "content": result})
+            trail = audit.read(case_id)
+            yield {"type": "tool_result", "record": trail[-1] if trail else None}
 
     # Ran out of steps. Escalate rather than return silence: an unresolved case has to land
     # somewhere a human will see it, and "the loop gave up" is a fact the trail should record.
     tools.escalate_to_human(case_id, "unknown", f"Agent did not finish within {MAX_STEPS} steps.")
-    return {
-        "reply": "Let me get a colleague to help with this — one moment.",
-        "claim": claim,
-        "steps": MAX_STEPS,
-        "trail": audit.read(case_id),
-    }
+    reply = "Let me get a colleague to help with this — one moment."
+    yield {"type": "reply", "reply": reply}
+    yield {"type": "done", "result": {"reply": reply, "claim": claim, "steps": MAX_STEPS, "trail": audit.read(case_id)}}
+
+
+async def run_case(case_id: str, message: str, temperature: float = 0.7, user=None) -> dict:
+    """Resolve one complaint end to end. Returns what happened, for the API and the eval.
+
+    A thin drain of run_case_events(): the loop lives there so the streaming demo and the graded
+    eval share one implementation. This returns only the final result dict.
+
+    temperature defaults to 0.7 because the eval needs independent samples (see the module
+    docstring). Pass 0.0 for a reproducible single run when demoing.
+
+    `user` makes the conversation two-sided. It's an optional callable taking the agent's reply
+    and the conversation so far, returning the customer's next message — or None when they've
+    stopped talking. Without it (a one-shot script), the agent's first reply ends the case. The
+    eval passes eval/simulator.py's customer here, which is the whole point: an agent that holds
+    policy against one message has proved little; the failure worth measuring is getting talked
+    out of it on the third turn, and that can't happen if nothing answers back.
+
+    No api_key is passed to completion(): litellm resolves the provider key from the environment
+    fresh on every request, which is what makes config.rotate_key() work. Passing it explicitly
+    would pin one key and silently defeat the rotation.
+
+    Returns {reply, claim, steps, trail}. `trail` is the audit records this case produced —
+    that's what the eval grades. The prose reply is for the human.
+    """
+    result: dict = {}
+    async for event in run_case_events(case_id, message, temperature, user):
+        if event["type"] == "done":
+            result = event["result"]
+    return result
