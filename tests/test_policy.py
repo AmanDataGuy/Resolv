@@ -91,3 +91,118 @@ def test_cap_uses_record_not_stated_amount():
     assert check_refund(fresh["order_id"], "late_delivery", cap, []).action == "allow"
     assert check_refund(fresh["order_id"], "late_delivery", cap + 0.01, []).rule_id == "refund_exceeds_cap"
 
+
+# --- Degenerate inputs (rule 0) --------------------------------------------------------------
+# Found by writing these tests, not in production: the agent never proposes a non-positive
+# amount, so no sweep would ever have surfaced it. A $0 refund silently burns the order's one
+# allowed refund (rule 4 then denies the real one); a negative refund charges the customer.
+
+@pytest.mark.parametrize("amount", [0.0, -0.01, -5.0, -1000.0])
+def test_non_positive_amounts_are_denied(amount):
+    fresh = _pick(situation="late", in_window=True)
+    decision = check_refund(fresh["order_id"], "late_delivery", amount, [])
+    assert decision.action == "deny" and decision.rule_id == "invalid_amount"
+
+
+def test_smallest_positive_amount_is_allowed():
+    """The boundary is at zero, not somewhere above it — a one-cent refund is still valid."""
+    fresh = _pick(situation="late", in_window=True)
+    assert check_refund(fresh["order_id"], "late_delivery", 0.01, []).action == "allow"
+
+
+# --- Boundaries: the exact edge of every threshold -------------------------------------------
+
+def test_exactly_at_cap_is_allowed_one_cent_over_is_not():
+    fresh = _pick(situation="late", in_window=True)
+    cap = round(fresh["amount_usd"] * REFUND_CAP_FRACTION["late_delivery"], 2)
+    assert check_refund(fresh["order_id"], "late_delivery", cap, []).rule_id == "within_policy"
+    assert check_refund(fresh["order_id"], "late_delivery", round(cap + 0.01, 2), []).rule_id == "refund_exceeds_cap"
+
+
+def test_exactly_at_auto_approve_limit_is_allowed_one_cent_over_escalates():
+    """Rule 6 is an escalate, not a deny: every rule above already agreed it's legitimate, so
+    what's left is a question of authority, not merit."""
+    big = _pick(situation="never_arrived", in_window=True, over_limit=True)
+    at = check_refund(big["order_id"], "never_arrived", AUTO_APPROVE_MAX_USD, [])
+    over = check_refund(big["order_id"], "never_arrived", AUTO_APPROVE_MAX_USD + 0.01, [])
+    assert at.action == "allow"
+    assert over.action == "escalate" and over.rule_id == "over_auto_approve_limit"
+
+
+def test_claim_window_boundary_separates_adjacent_orders():
+    """The oldest in-window order passes rule 3; the youngest out-of-window one does not."""
+    in_window = max((o for o in _ORDERS if o["situation"] == "late" and _age(o) <= CLAIM_WINDOW_DAYS),
+                    key=_age, default=None)
+    out_window = min((o for o in _ORDERS if o["situation"] == "late" and _age(o) > CLAIM_WINDOW_DAYS),
+                     key=_age, default=None)
+    if not in_window or not out_window:
+        pytest.skip("need orders on both sides of the claim window")
+    assert _age(in_window) <= CLAIM_WINDOW_DAYS < _age(out_window)
+    assert check_refund(in_window["order_id"], "late_delivery", 1.0, []).rule_id != "outside_claim_window"
+    assert check_refund(out_window["order_id"], "late_delivery", 1.0, []).rule_id == "outside_claim_window"
+
+
+# --- First-match semantics: the rule ORDER is part of the contract ---------------------------
+# Each of these presents a request that violates TWO rules at once and asserts which one answers.
+# If the order ever changes, a denial's reason changes with it — and the reason is what the
+# customer is told and what the scorecard groups by.
+
+def test_rule0_precedes_rule1_unknown_order_with_negative_amount():
+    assert check_refund("ORD-999999", "late_delivery", -5.0, []).rule_id == "invalid_amount"
+
+
+def test_rule1_precedes_rule5_unknown_order_is_not_a_cap_problem():
+    assert check_refund("ORD-999999", "late_delivery", 999999.0, []).rule_id == "unknown_order"
+
+
+def test_rule2_precedes_rule5_untrue_claim_is_not_a_cap_problem():
+    on_time = _pick(situation="on_time")
+    assert check_refund(on_time["order_id"], "late_delivery", 999999.0, []).rule_id == "claim_not_supported"
+
+
+def test_rule3_precedes_rule5_stale_order_is_not_a_cap_problem():
+    stale = _pick(situation="late", in_window=False)
+    assert check_refund(stale["order_id"], "late_delivery", 999999.0, []).rule_id == "outside_claim_window"
+
+
+def test_rule4_precedes_rule5_second_refund_is_not_a_cap_problem():
+    fresh = _pick(situation="late", in_window=True)
+    history = [{"tool": "issue_refund", "order_id": fresh["order_id"], "ok": True,
+                "args": {"amount_usd": 5.0}}]
+    assert check_refund(fresh["order_id"], "late_delivery", 999999.0, history).rule_id == "already_refunded"
+
+
+def test_rule5_precedes_rule6_over_cap_beats_over_limit():
+    """An amount over BOTH the cap and the auto-approve limit is a cap denial, not an escalation:
+    escalating it would put an illegitimate request in front of a human as if it were legitimate."""
+    big = _pick(situation="never_arrived", in_window=True, over_limit=True)
+    over_both = round(big["amount_usd"] + 100.0, 2)
+    assert over_both > AUTO_APPROVE_MAX_USD
+    assert check_refund(big["order_id"], "never_arrived", over_both, []).rule_id == "refund_exceeds_cap"
+
+
+def test_denied_prior_refund_does_not_block_a_later_one():
+    """Rule 4 filters on ok=True. A refused attempt is recorded but must not count as a refund."""
+    fresh = _pick(situation="late", in_window=True)
+    history = [{"tool": "issue_refund", "order_id": fresh["order_id"], "ok": False,
+                "args": {"amount_usd": 999999.0}}]
+    cap = round(fresh["amount_usd"] * REFUND_CAP_FRACTION["late_delivery"], 2)
+    assert check_refund(fresh["order_id"], "late_delivery", min(cap, AUTO_APPROVE_MAX_USD),
+                        history).action == "allow"
+
+
+def test_refund_on_a_different_order_is_unaffected_by_history():
+    """Rule 4 is scoped per order — one refund must not freeze every other order in the case."""
+    first = _pick(situation="late", in_window=True)
+    others = [o for o in _ORDERS
+              if o["situation"] == "late" and _age(o) <= CLAIM_WINDOW_DAYS
+              and o["order_id"] != first["order_id"]]
+    if not others:
+        pytest.skip("need a second in-window late order")
+    second = others[0]
+    history = [{"tool": "issue_refund", "order_id": first["order_id"], "ok": True,
+                "args": {"amount_usd": 5.0}}]
+    cap = round(second["amount_usd"] * REFUND_CAP_FRACTION["late_delivery"], 2)
+    assert check_refund(second["order_id"], "late_delivery", min(cap, AUTO_APPROVE_MAX_USD),
+                        history).action == "allow"
+
