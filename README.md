@@ -34,7 +34,7 @@ The agent has no authority. It emits tool calls; [`harness/tools.py`](harness/to
 
 | Decision | Why |
 |---|---|
-| **Policy is Python, not a prompt** | Six first-match rules over the order record and a cap table. The model's own "rules" were already a threshold table; asking a model to apply a table it can only get *wrong* is pure downside. |
+| **Policy is Python, not a prompt** | Seven first-match rules over the order record and a cap table. The model's own "rules" were already a threshold table; asking a model to apply a table it can only get *wrong* is pure downside. |
 | **The cap comes from the record, never the customer** | The refund cap is a fraction of what the order shows was *paid* — so an inflated claim ($900 on a $639.43 order) is refused by arithmetic, not by the model noticing. |
 | **The audit trail IS the state** | Every attempt — allowed *or denied* — is appended to a JSONL trail. Rule 4 reads it to catch a double refund; the eval grades from it; the demo renders it. One source of truth. |
 | **Denials are results, not exceptions** | A refused refund comes back as a string the agent explains to the customer, not a crash that strands them mid-conversation. |
@@ -50,7 +50,7 @@ flowchart TD
     Loop -->|lookup / refund / escalate| Tools[tools.py<br>the only write path]:::h
 
     subgraph HARNESS ["harness/ · deterministic · no LLM"]
-        Tools --> Policy[policy.py<br>6 rules, first match]:::h
+        Tools --> Policy[policy.py<br>7 rules, first match]:::h
         Policy --> Audit[(audit trail<br>append-only JSONL)]:::io
     end
 
@@ -130,7 +130,7 @@ cp .env.example .env                        # add one provider key
 
 # The deterministic core — no API key needed:
 pytest -q                       # 9 tests: every policy rule, one allow and one deny each
-python -m harness.policy        # the 6 rules, against the real order DB
+python -m harness.policy        # the 7 rules, against the real order DB
 python -m eval.metrics          # the scoring math, checked against hand-worked numbers
 
 # Needs an LLM key:
