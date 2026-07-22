@@ -26,8 +26,9 @@ cheapest and most fundamental first — existence, then truth, then limits. Ever
 a reason a human can read, because a policy engine nobody can debug gets switched off within a
 week.
 
-WHAT THIS DELIBERATELY ISN'T. No Rego, no OPA, no external policy service. Six rules over two
-dicts is a function, and reaching for a policy DSL here would be resume-driven architecture.
+WHAT THIS DELIBERATELY ISN'T. No Rego, no OPA, no external policy service. Seven rules over the
+order record and a cap table is a function, and reaching for a policy DSL here would be
+resume-driven architecture.
 The point is that a reviewer reads this in a minute and can say exactly what the system will
 and won't do.
 """
@@ -82,6 +83,18 @@ def check_refund(order_id: str, claim_type: str, amount_usd: float, history: lis
     inputs, same verdict, always. That's what makes it testable, and what makes a pass^k eval
     reproducible instead of dependent on whatever happens to be on disk.
     """
+    # --- Rule 0: the amount must be a positive number. --------------------------------------
+    # Input validation at the trust boundary, before any rule that needs the order record. A
+    # $0.00 refund is a no-op that still burns the order's one allowed refund — rule 4 would then
+    # deny the real one — and a NEGATIVE refund is a charge to the customer wearing a refund's
+    # name. Neither is a judgment call, so neither belongs below a lookup.
+    #
+    # Found by the degenerate-input tests in tests/test_policy.py, not in production: the agent
+    # never proposes a negative amount, so no sweep would ever have surfaced it. That is the
+    # argument for testing boundaries rather than only the path the happy case walks.
+    if amount_usd <= 0:
+        return _decide("deny", "invalid_amount", f"${amount_usd:.2f} is not a positive refund amount.")
+
     # --- Rule 1: the order must exist. ------------------------------------------------------
     # First, because every rule below reads the order record. A customer citing an order we've
     # never heard of is the most common adversarial opening — they misremember, or they're
@@ -163,6 +176,10 @@ def demo() -> None:
     fresh = next(o for o in orders if o["situation"] == "late" and _age(o) <= CLAIM_WINDOW_DAYS)
     stale = next(o for o in orders if o["situation"] == "late" and _age(o) > CLAIM_WINDOW_DAYS)
 
+    # 0 — a non-positive amount is rejected before the order is even looked up
+    assert check_refund(fresh["order_id"], "late_delivery", 0.0, []).rule_id == "invalid_amount"
+    assert check_refund(fresh["order_id"], "late_delivery", -5.0, []).rule_id == "invalid_amount"
+
     # 1 — an order we've never heard of
     assert check_refund("ORD-999999", "late_delivery", 10.0, []).rule_id == "unknown_order"
 
@@ -193,7 +210,7 @@ def demo() -> None:
     assert check_refund(big["order_id"], "never_arrived", AUTO_APPROVE_MAX_USD + 0.01, []).action == "escalate"
     assert check_refund(big["order_id"], "never_arrived", AUTO_APPROVE_MAX_USD, []).action == "allow"
 
-    print(f"policy demo OK — 6 rules, clock={NOW}, {len(orders)} orders loaded")
+    print(f"policy demo OK — 7 rules, clock={NOW}, {len(orders)} orders loaded")
 
 
 if __name__ == "__main__":
