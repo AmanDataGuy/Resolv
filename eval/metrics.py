@@ -22,7 +22,7 @@ THE GEOMETRIC MEAN FOR TRAJECTORIES
     geometric mean. Refunding a fraudulent claim after nineteen polite messages is a failure,
     not a 95%. Any zero must zero the trajectory — which is exactly what a product does.
 """
-from math import comb, exp, log, sqrt
+from math import ceil, comb, exp, log, sqrt
 
 
 def pass_hat_k(n: int, c: int, k: int) -> float:
@@ -113,6 +113,20 @@ def mcnemar(b: int, c: int) -> tuple[float, bool]:
     return (chi2, chi2 > 3.841)  # 3.841 = chi-square critical value, 1 df, alpha = 0.05
 
 
+def _percentile(values: list[float], p: int) -> float | None:
+    """Nearest-rank percentile. None on an empty list — no data is not 0.0 seconds.
+
+    Nearest-rank rather than interpolating: with 200 runs the difference is invisible, and a
+    latency figure that is an actual observed run is easier to defend than one that is an average
+    of two runs neither of which happened. (ponytail: no numpy for one line of sorting.)
+    """
+    if not values:
+        return None
+    ordered = sorted(values)
+    i = max(0, min(len(ordered) - 1, ceil(p / 100 * len(ordered)) - 1))
+    return round(ordered[i], 2)
+
+
 def scorecard(runs: list[dict], k: int = 3) -> dict:
     """The numbers that decide whether this agent is shippable.
 
@@ -133,6 +147,15 @@ def scorecard(runs: list[dict], k: int = 3) -> dict:
     by_task: dict[str, list[dict]] = {}
     for r in runs:
         by_task.setdefault(r["task_id"], []).append(r)
+
+    def rate(field: str) -> float | None:
+        """Share of True over the runs where `field` isn't None — None means the question didn't
+        apply to that run (nothing was refunded, nothing was refused), and folding those in as
+        failures would penalise an agent for a test it was never given. Returns None if no run
+        posed the question at all, which is different from every run failing it.
+        """
+        asked = [r[field] for r in runs if r.get(field) is not None]
+        return round(sum(asked) / len(asked), 4) if asked else None
 
     # pass^k per task, then averaged: E_task[C(c,k)/C(n,k)]. Averaging per-task estimates IS the
     # estimator — pooling every run into one ratio would silently weight tasks by how many times
@@ -167,6 +190,18 @@ def scorecard(runs: list[dict], k: int = 3) -> dict:
         "resolve_rate": round(resolved_total / total, 4) if total else 0.0,
         "resolve_ci95": tuple(round(x, 4) for x in wilson(resolved_total, total)),
         "mean_steps": round(sum(r.get("steps", 0) for r in runs) / total, 2) if total else 0.0,
+        # Did the prose match the trail? Distinct from every metric above, all of which grade the
+        # trail alone and would score "I've refunded you $312" (with no refund) as a clean run.
+        "reply_grounded_rate": rate("reply_grounded"),
+        # Did it read the order before refunding it, and did it come back after a refusal?
+        "lookup_before_refund_rate": rate("looked_up_first"),
+        "recovery_rate": rate("recovered"),
+        # Operational cost of the accuracy above. A number that only looks good at $0.02 and
+        # 40 seconds a case is a research result, not a shippable one. p95, not mean: the tail is
+        # what a queue actually feels, and one 90-second run hides inside a healthy average.
+        "p50_latency_s": _percentile([r["latency_s"] for r in runs if r.get("latency_s")], 50),
+        "p95_latency_s": _percentile([r["latency_s"] for r in runs if r.get("latency_s")], 95),
+        "usd_total": round(sum(r.get("usd") or 0.0 for r in runs), 4),
     }
 
 

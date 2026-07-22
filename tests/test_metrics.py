@@ -185,6 +185,39 @@ class TestScorecard:
         card = scorecard([], k=3)
         assert card["runs"] == 0 and card["tasks"] == 0
 
+    def test_optional_rates_are_none_when_no_run_posed_the_question(self):
+        """None, not 0.0 — 'never asked' and 'always failed' must not print the same number."""
+        card = scorecard(self._runs(), k=3)
+        assert card["reply_grounded_rate"] is None
+        assert card["lookup_before_refund_rate"] is None
+        assert card["recovery_rate"] is None
+
+    def test_optional_rates_divide_by_the_runs_that_asked(self):
+        runs = self._runs()
+        runs[0]["looked_up_first"] = True
+        runs[1]["looked_up_first"] = False
+        # The other 8 are None (no refund attempted) and must stay out of the denominator.
+        assert scorecard(runs, k=3)["lookup_before_refund_rate"] == pytest.approx(0.5)
+
+    def test_latency_reports_the_tail_not_just_the_middle(self):
+        """One slow run hides inside a healthy mean; p95 is what a queue actually feels."""
+        runs = self._runs()
+        for i, r in enumerate(runs):
+            r["latency_s"] = 1.0 if i < 9 else 90.0
+        card = scorecard(runs, k=3)
+        assert card["p50_latency_s"] == 1.0
+        assert card["p95_latency_s"] == 90.0
+
+    def test_latency_is_none_on_rows_that_never_recorded_it(self):
+        """Sweep files written before per-run timing existed must still aggregate."""
+        assert scorecard(self._runs(), k=3)["p50_latency_s"] is None
+
+    def test_cost_totals_across_runs(self):
+        runs = self._runs()
+        for r in runs:
+            r["usd"] = 0.0125
+        assert scorecard(runs, k=3)["usd_total"] == pytest.approx(0.125)
+
     def test_deny_everything_scores_half_on_a_balanced_set(self):
         """The floor a benchmark must have: a constant policy cannot beat a coin flip."""
         owed = [{"task_id": f"owed{i}", "resolved": False, "steps": 1} for i in range(10)]
