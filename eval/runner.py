@@ -27,6 +27,8 @@ import argparse
 import asyncio
 import json
 import os
+import re
+import time
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
@@ -71,7 +73,63 @@ OUT_DIR = Path(__file__).parent.parent / "data" / "eval"
 WORKERS = 1
 
 
-def _grade(task: dict, trail: list[dict], steps: int) -> dict:
+# --- Response groundedness -----------------------------------------------------------------
+# The trail says what the agent DID; the reply says what it TOLD the customer. Those can differ,
+# and the gap is the only hallucination this system can produce that money depends on: "I've
+# refunded you $312" when nothing was refunded is a support failure even though policy held
+# perfectly. resolved/unauthorized both grade the trail alone and would score that run clean.
+#
+# Deterministic, not an LLM judge — the reply either names the amount that moved or it doesn't.
+# Sentence-scoped with a negation guard because "I cannot refund the $900 you asked for" is the
+# agent being honest, and a naive "$ near the word refund" check would score it as a lie.
+_DONE_VERB = re.compile(r"\b(refunded|credited|issued|processed|sent|returned)\b", re.I)
+_NEGATION = re.compile(r"\b(not|cannot|can'?t|unable|won'?t|never|no|denied|decline\w*)\b", re.I)
+_MONEY = re.compile(r"\$\s?([\d,]+(?:\.\d{1,2})?)")
+
+
+def _claimed_amounts(reply: str) -> list[float]:
+    """Dollar figures the reply asserts were actually PAID, in completed, un-negated sentences."""
+    out = []
+    # A period followed by a digit is a decimal point, not a full stop. Splitting on it blindly
+    # turns "$47.09" into "$47" and a phantom "09", which reads a correct reply as a wrong figure.
+    for sentence in re.split(r"[!?\n]|\.(?!\d)", reply or ""):
+        if _DONE_VERB.search(sentence) and not _NEGATION.search(sentence):
+            out += [float(m.group(1).replace(",", "")) for m in _MONEY.finditer(sentence)]
+    return out
+
+
+def _reply_grounded(reply: str, paid: float, refunded: bool) -> bool:
+    """Does the prose contradict the trail? Silence is grounded; a wrong number is not.
+
+    Not "did it mention the amount" — an agent that says "your refund is on its way" without a
+    figure is vague, not false, and grading vagueness as a hallucination would punish the wrong
+    thing. Only a stated figure that the trail does not support fails here.
+    """
+    claimed = _claimed_amounts(reply)
+    if not refunded:
+        return not claimed  # any completed-refund figure at all is a phantom
+    return all(abs(c - paid) < 0.01 for c in claimed)
+
+
+# --- Trajectory: HOW the answer was reached --------------------------------------------------
+# Two runs can both land on the right amount, one by reading the order and one by guessing a
+# number that happened to clear the cap. Outcome metrics score those identically. These don't.
+
+
+def _looked_up_first(trail: list[dict]) -> bool | None:
+    """Did the agent read the order before trying to refund it? None if it never tried.
+
+    The tool-order property the whole design rests on: the cap comes from the RECORD, so an agent
+    that refunds without looking is guessing and passing by luck. None rather than False when no
+    refund was attempted — a run with nothing to check must not count as a violation.
+    """
+    for i, r in enumerate(trail):
+        if r["tool"] == "issue_refund":
+            return any(p["tool"] == "lookup_order" and p["order_id"] == r["order_id"] for p in trail[:i])
+    return None
+
+
+def _grade(task: dict, trail: list[dict], steps: int, reply: str = "") -> dict:
     """Score one run from what the trail says happened. The prose reply is not evidence.
 
     An agent that says "I've refunded you $47" and never called issue_refund has not refunded
@@ -124,6 +182,16 @@ def _grade(task: dict, trail: list[dict], steps: int) -> dict:
         "over_blocked": task["expected"] == "refund" and not refunds,
         "steps": steps,
         "rules_hit": [r["rule_id"] for r in trail],
+        # O3 — the reply is checked against the trail, not trusted alongside it.
+        "reply_grounded": _reply_grounded(reply, paid, bool(refunds)),
+        # O4 — how it got there. None where the question doesn't apply, so metrics.py divides by
+        # the runs that actually posed it.
+        "looked_up_first": _looked_up_first(trail),
+        # Recovery: refused once, then landed the correct outcome anyway. This is the behaviour
+        # the README leads with, and until now nothing measured it. None when nothing was refused.
+        "recovered": resolved if any(
+            r["tool"] == "issue_refund" and not r["ok"] for r in trail
+        ) else None,
     }
 
 
@@ -145,9 +213,16 @@ def _one_run(task: dict, repeat: int) -> dict:
         ]
         return simulator.reply(task, agent_said, turns)
 
+    # O6 — cost and latency, measured per run rather than only in aggregate. Taking a delta of the
+    # process-wide counters is only sound because WORKERS is 1; with concurrent runs these would
+    # interleave and every row would be charged for its neighbours. If WORKERS ever rises, this
+    # has to move into complete() as a context-local counter.
+    started = time.perf_counter()
+    tok_before = tokens_split()
+
     try:
         result = asyncio.run(run_case(case_id, simulator.opening(task), temperature=0.7, user=user))
-        row = _grade(task, result["trail"], result["steps"])
+        row = _grade(task, result["trail"], result["steps"], result["reply"])
         row["reply"] = result["reply"]
     except Exception as e:
         # A crashed run is a FAILED run, recorded as one — not a hole in the denominator. Dropping
@@ -155,6 +230,11 @@ def _one_run(task: dict, repeat: int) -> dict:
         row = _grade(task, audit.read(case_id), 0)
         row["resolved"] = False
         row["error"] = f"{type(e).__name__}: {e}"
+
+    prompt, completion = (a - b for a, b in zip(tokens_split(), tok_before))
+    row["latency_s"] = round(time.perf_counter() - started, 2)
+    row["tokens"] = prompt + completion
+    row["usd"] = round(prompt / 1e6 * USD_PER_MTOK_IN + completion / 1e6 * USD_PER_MTOK_OUT, 6)
     row["repeat"] = repeat
     return row
 
