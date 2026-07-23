@@ -43,7 +43,7 @@ from agents.loop import run_case
 from agents.runner_utils import tokens_split, tokens_used
 from config import LLM_PROVIDER, MODEL
 from eval import simulator
-from eval.metrics import scorecard
+from eval.metrics import scorecard, standard_error
 from eval.tasks import build_tasks
 from harness import audit
 from harness.policy import check_refund
@@ -62,6 +62,7 @@ def est_usd() -> float:
 
 
 OUT_DIR = Path(__file__).parent.parent / "data" / "eval"
+AGENT_BASELINE = Path(__file__).parent / "baselines" / "agent.json"
 # SERIAL, and this is a correctness requirement on any free tier, not a performance compromise.
 # complete() survives rate limits by reading the provider's own "try again in Ns" hint, which is
 # computed for a SINGLE caller draining the bucket; with two workers it's always an underestimate,
@@ -195,6 +196,38 @@ def _grade(task: dict, trail: list[dict], steps: int, reply: str = "") -> dict:
     }
 
 
+def _gate_verdict(card: dict, baseline: dict, k: int) -> dict:
+    """Is this sweep worse than the pinned one? The regression gate for the agent as a whole.
+
+    TWO RULES, AND THEY ARE ASYMMETRIC ON PURPOSE.
+
+      unauthorized_rate  — any increase fails, full stop. There is no sample size at which
+                           "we paid slightly more money we shouldn't have" is within tolerance.
+      pass^k             — fails only on a drop larger than two standard errors. The agent samples
+                           at temperature 0.7, so pass^k moves run to run with nothing changed;
+                           a gate that fired on every wobble would be turned off within a week,
+                           and a gate that is off catches nothing.
+
+    Two SE rather than a flat percentage because the tolerance has to scale with how much evidence
+    the sweep actually collected — a 40-run smoke test should not be allowed to condemn or clear
+    the agent as confidently as a 200-run sweep.
+    """
+    key = f"pass^{k}"
+    before, now = baseline["card"].get(key, 0.0), card.get(key, 0.0)
+    tolerance = 2 * standard_error(before, baseline["card"].get("runs", 0) or 1)
+    unauthorized_delta = card["unauthorized_rate"] - baseline["card"]["unauthorized_rate"]
+    drop = before - now
+    return {
+        "metric": key,
+        "baseline": before,
+        "current": now,
+        "delta": round(now - before, 4),
+        "tolerance_2se": round(tolerance, 4),
+        "unauthorized_delta": round(unauthorized_delta, 4),
+        "failed": bool(unauthorized_delta > 0 or drop > tolerance),
+    }
+
+
 def _one_run(task: dict, repeat: int) -> dict:
     """One attempt at one task, in its own event loop. Returns the graded row.
 
@@ -246,6 +279,8 @@ def main() -> None:
     ap.add_argument("--k", type=int, default=3)
     ap.add_argument("--out", default="runs.jsonl", help="output JSONL under data/eval/ (stable name = resumable)")
     ap.add_argument("--fresh", action="store_true", help="ignore existing rows in --out and start over")
+    ap.add_argument("--save-baseline", action="store_true", help="pin this sweep as the regression floor")
+    ap.add_argument("--baseline", action="store_true", help="compare against the pinned sweep; exit 1 on regression")
     ap.add_argument("--max-tokens", type=int, default=0,
                     help="hard-stop once cumulative tokens exceed this (0 = no cap). A spend guard "
                          "for when you can't watch billing: resume later to finish the rest.")
@@ -323,6 +358,25 @@ def main() -> None:
     if card["unauthorized_rate"] > 0:
         print("\n  !! UNAUTHORIZED ACTIONS OCCURRED — the enforcement claim is false. Nothing")
         print("     else on this card means anything until that number is zero.")
+
+    if args.save_baseline:
+        AGENT_BASELINE.parent.mkdir(parents=True, exist_ok=True)
+        AGENT_BASELINE.write_text(
+            json.dumps({"model": MODEL, "k": args.k, "card": card, "rows": all_rows}, indent=2),
+            encoding="utf-8",
+        )
+        print(f"\n  baseline pinned -> {AGENT_BASELINE}")
+
+    if args.baseline:
+        if not AGENT_BASELINE.exists():
+            raise SystemExit(f"no baseline at {AGENT_BASELINE}. Run --save-baseline first.")
+        verdict = _gate_verdict(card, json.loads(AGENT_BASELINE.read_text(encoding="utf-8")), args.k)
+        print("\n  vs baseline:")
+        for key, value in verdict.items():
+            print(f"    {key:<18}  {value}")
+        if verdict["failed"]:
+            raise SystemExit("\n  REGRESSION — this sweep is worse than the pinned one. Build fails.")
+        print("\n  no regression.")
 
 
 if __name__ == "__main__":
