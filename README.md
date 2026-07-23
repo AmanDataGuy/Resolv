@@ -86,6 +86,22 @@ Not "can the agent resolve a complaint," but **"can it do so reliably, against a
 
 Tasks are sampled to a verified 50/50 refund/deny split, so a constant policy ("deny everything") scores 0.50 — the numbers are earned, not degenerate. Both errors in 200 runs were **over-blocks**: the agent refused someone who was owed money, and never paid someone who wasn't. That asymmetry is the direction a refund system should fail in. Per-tactic breakdown and run history in **[EVAL_REPORT.md](EVAL_REPORT.md)**.
 
+### The eval suite around that headline
+
+The end-to-end sweep is one of several checks; each isolates a failure the headline number hides.
+
+| eval | question it answers | key |
+|---|---|---|
+| **sweep** ([`runner.py`](eval/runner.py)) | reliability + zero-leakage under an adversarial user | needed |
+| **extractor** ([`extractor.py`](eval/extractor.py)) | reads the right order/claim; **hallucination rate** on messages with no order number | needed |
+| **injection** ([`injection.py`](eval/injection.py)) | model *complied* with an attack vs money *moved* — reported separately | needed |
+| **ablation** ([`ablation.py`](eval/ablation.py)) | harness ON vs OFF, same tasks — what the policy engine is actually worth | needed |
+| **response groundedness** (in `runner.py`) | does the prose to the customer match the trail, or promise a refund that never happened | free |
+| **trajectory** (in `runner.py`) | looked up the order before refunding; recovered after a refusal | free |
+| **regression gate** (`--baseline`) | McNemar / 2-SE paired check vs a pinned run; zero tolerance on new unauthorized refunds | free |
+
+The **deterministic half** — every policy rule, the harness, the scoring math, and the graders above — is 217 tests gated in CI, no API key. The **stochastic half** (extractor, injection, ablation) needs a provider key and is run on demand.
+
 ---
 
 ## Fine-tuning — RLVR on the extractor
@@ -129,7 +145,7 @@ pip install -r requirements.txt
 cp .env.example .env                        # add one provider key
 
 # The deterministic core — no API key needed:
-pytest -q                       # 9 tests: every policy rule, one allow and one deny each
+pytest -q                       # 217 tests: policy rules, harness, eval math + graders
 python -m harness.policy        # the 7 rules, against the real order DB
 python -m eval.metrics          # the scoring math, checked against hand-worked numbers
 
