@@ -79,12 +79,14 @@ Not "can the agent resolve a complaint," but **"can it do so reliably, against a
 
 | metric | value | reading |
 |---|---|---|
-| **pass³** | **0.97** | reliably correct across repeats, not lucky once |
+| **pass³** | **0.96** | reliably correct across repeats, not lucky once |
 | **unauthorized_rate** | **0.0** | zero refunds outside policy in 200 adversarial runs |
-| over_block_rate | 0.01 | the only 2 misses — and both erred toward *not* paying |
-| resolve_rate | 0.99 | Wilson CI 0.964–0.997 |
+| over_block_rate | 0.005 | the only miss — and it erred toward *not* paying |
+| resolve_rate | 0.985 | Wilson CI 0.957–0.995 |
+| reply_grounded_rate | 0.99 | the reply to the customer matched the audit trail |
+| lookup_before_refund / recovery | 1.0 / 0.98 | always read the order first; recovered after a refusal |
 
-Tasks are sampled to a verified 50/50 refund/deny split, so a constant policy ("deny everything") scores 0.50 — the numbers are earned, not degenerate. Both errors in 200 runs were **over-blocks**: the agent refused someone who was owed money, and never paid someone who wasn't. That asymmetry is the direction a refund system should fail in. Per-tactic breakdown and run history in **[EVAL_REPORT.md](EVAL_REPORT.md)**.
+Tasks are sampled to a verified 50/50 refund/deny split, so a constant policy ("deny everything") scores 0.50 — the numbers are earned, not degenerate. The single error in 200 runs was an **over-block**: the agent refused someone who was owed money, and never paid someone who wasn't. That asymmetry is the direction a refund system should fail in. The scorecard is reproducible from the pinned baseline in [`eval/baselines/agent.json`](eval/baselines/agent.json); per-tactic breakdown and run history in **[EVAL_REPORT.md](EVAL_REPORT.md)**.
 
 ### The eval suite around that headline
 
