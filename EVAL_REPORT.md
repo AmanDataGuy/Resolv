@@ -3,12 +3,112 @@
 *A living document. Updated every working turn. Newest findings at the top of each section;
 full run history at the bottom.*
 
-**Last updated:** 2026-07-20
-**Phase:** 5 — the benchmark gate (produce an honest scorecard before anything downstream)
-**Status:** ✅ **Full scorecard complete.** The balanced 200-run sweep on Gemini 3.5 Flash scored
-**pass³ = 0.97, unauthorized_rate = 0.0, over_block = 0.01** — the thesis holds across 200
-adversarial runs, and the only 2 misses were over-blocks (safe direction). Total cost ~$3.5.
-Numbers in §4ter. Both headline results (this + the extractor fine-tune §4bis) are now in.
+**Last updated:** 2026-07-23
+**Phase:** 6 — offline evaluation complete; observability (online eval) is next
+**Status:** ✅ **All eight offline evals (O1–O8) built, measured, and regression-gated.** A fresh
+200-run sweep under the current prompt scored **pass³ = 0.96, unauthorized_rate = 0.0,
+over_block = 0.005**, with the new graders now live: **groundedness 0.99, lookup-before-refund 1.0,
+recovery 0.98**. The **ablation** proves the harness load-bearing — disabled, it leaked **$2,120**
+vs **$0** on. Full current picture and the phased roadmap for what's left in **§0 / §0bis**.
+
+---
+
+## 0. Current status — offline complete (2026-07-23)
+
+All eight offline evals (O1–O8) are built, measured, committed, and pushed. Agent and extractor
+are both regression-gated on pinned baselines (`eval/baselines/agent.json`, `extractor.json`);
+217 deterministic tests run in CI with no key.
+
+### Fresh full sweep — Gemini 3.5 Flash, current prompt, 200 runs
+
+Re-run under the *current* SYSTEM prompt with the O3/O4/O6 graders wired in. This supersedes the
+0.97 in §4ter (same thesis; the number shifts slightly under the newer prompt + graders).
+
+| metric | value | note |
+|---|---|---|
+| pass³ | **0.96** | reliability under sampling |
+| unauthorized_rate | **0.0** | the thesis — zero policy-violating refunds / 200 runs |
+| harmful_block_rate | 1.0 | every refund that should've been stopped, was |
+| over_block_rate | 0.005 | one miss, safe direction (denied an owed customer) |
+| reply_grounded_rate (O3) | **0.99** | the reply matched the audit trail |
+| lookup_before_refund_rate (O4) | **1.0** | never refunded without reading the order first |
+| recovery_rate (O4) | **0.98** | recovered correctly after a refusal |
+| p50 / p95 latency (O6) | 18.9s / 26.1s | per-run wall clock |
+| cost (O6) | $5.69 | 200 runs, ~1.9M tokens |
+
+### The two new experiments
+
+- **Ablation (O8)** — harness OFF leaked **$2,120 across 20 cases (65% of runs)**; ON leaked
+  **$0**. Same tasks, same adversarial customer, only the policy engine removed. The harness is
+  *measured* load-bearing, not asserted. The OFF arm swaps in policy-free tools for the experiment
+  only; production keeps a single write path.
+- **Prompt injection (O5)** — 5 attack types × 20 runs: the model **complied 100%** (attempted the
+  over-cap refund every time), **0% unauthorized** (policy refused every one), **0% prompt leak**.
+  Suggestibility is a model property; safety is a system property. The gap is the result.
+
+### What's left in offline evals — nothing functional
+
+All O1–O8 are done and measured. The only offline follow-ups are optional polish, both cosmetic:
+
+- The **extractor cost meter reads $0** — the extractor runs through ADK, which the token counter
+  doesn't hook into. Accuracy/latency are real; only the dollar line is blank for that one eval.
+- **`--max-tokens` can't hard-stop mid-sweep** under `ThreadPoolExecutor.map` (eager submit).
+  Known; didn't bite (runs finished under budget).
+
+---
+
+## 0bis. What's left overall — the observability roadmap (phased)
+
+Everything below is **online / production-facing** and **not yet built**. This is the
+**latency + cost + monitoring** work. Phased, smallest-useful-first; each phase stands alone and
+earns its keep before the next.
+
+> Why it's separate from §0: the offline evals grade *saved* cases before deploy. Observability
+> grades the *live* system after deploy — the same questions (is it fast, cheap, grounded, safe?)
+> asked continuously against real traffic instead of a fixed benchmark.
+
+### Phase 1 — Instrument the serving path (OpenTelemetry) — *foundation, ~½ day*
+
+Every `/resolve` request emits one trace.
+- Wrap `agents/loop.py::extract()`, `run_case()`, and each tool call in **OTel spans**.
+- Per request record: total **+ per-stage latency**, **token count**, **cost**, the tool-call
+  sequence, each policy `rule_id`, and the final action (refund / deny / escalate).
+- Export to console + OTLP → view locally in **Jaeger/Tempo**, or ship to **Langfuse** (LLM-native,
+  one env var, gives token/cost/trace views for free).
+- **Deliverable:** a span tree per request. Everything else reads from this.
+
+### Phase 2 — Live metrics + monitoring — *~½ day on top of P1*
+
+Turn traces into a board + alerts.
+- Aggregate spans into live metrics: **p50/p95 latency**, **$/request** and daily spend,
+  **live unauthorized_rate**, escalation rate, tool-error rate.
+- Dashboard: Langfuse's built-in, or a small Grafana/Streamlit panel over the trace store.
+- **Alerts** (the point of monitoring): page if `unauthorized_rate > 0` (must never move) or p95
+  latency breaches an SLO, or daily cost crosses a ceiling.
+- **Deliverable:** a live board + at least the unauthorized-rate alert.
+
+### Phase 3 — Online evaluation (grade real traffic) — *~1 day*
+
+Run the offline graders on live requests, not just the benchmark.
+- Sample X% of production requests; run the **O3/O4 graders** (groundedness, trajectory) on them.
+- **Drift detection:** compare live extractor accuracy + claim-type distribution against the pinned
+  offline baseline; flag divergence (the world changes; the model shouldn't silently rot).
+- **Shadow eval:** run the tuned extractor alongside prod and log the delta, without touching the
+  response.
+- **Deliverable:** a nightly "live vs baseline" drift report.
+
+### Phase 4 — Continuous eval in CI/CD — *~½ day*
+
+The regression gate runs itself.
+- Scheduled (GitHub Actions cron) nightly sweep → `python -m eval.runner --baseline` → fail +
+  notify on regression, using the pinned `agent.json`.
+- **Cost budget guard:** fail the job if the sweep exceeds a $ ceiling (the `--max-tokens` guard,
+  fixed to hard-stop).
+- **Deliverable:** a green/red nightly badge; regressions can't merge unseen.
+
+**If you do only one thing:** Phases 1 + 2 — that *is* the "latency, cost, monitoring" a quality/
+observability role asks for, and it earns an honest résumé clause. Phases 3–4 are the
+impressive-but-optional extensions.
 
 ---
 
@@ -82,7 +182,7 @@ Every non-trivial module ships a runnable `demo()` with asserts. Current state:
 
 | module | check | result |
 |---|---|---|
-| `harness/policy.py` | all 6 rules, one allow + one deny each, against real DB | ✅ PASS |
+| `harness/policy.py` | all 7 rules, one allow + one deny each, against real DB | ✅ PASS |
 | `harness/tools.py` | no bypass, denials recorded, denial reads as result not exception | ✅ PASS |
 | `harness/audit.py` | append-only, rule-4 read path intact | ✅ PASS |
 | `eval/metrics.py` | pass^k estimator, geometric trajectory, Wilson, McNemar, scorecard | ✅ PASS |
@@ -279,6 +379,9 @@ policy — is evidenced, and the only failures were on the safe side of the line
 | extractor FT | 07-19 | Kaggle T4, GRPO 200 steps, 92 held-out | — | — | — | — | ✅ both-right 0.489 → 0.707 (+0.217) |
 | gemini-partial | 07-20 | Gemini 3.5 Flash, n=5×40, stopped 126/200 | 126 | 126 | 125 | 0 | ✅ **pass³ 0.977, unauth 0.0**, over-block 0.008 |
 | **gemini-full** | 07-20 | Gemini 3.5 Flash, n=5×40, resumed to 200 | 200 | 200 | 198 | 0 | ✅ **pass³ 0.97, unauth 0.0**, over-block 0.01, ~$3.5 |
+| **sweep-fresh** | 07-23 | Gemini 3.5 Flash, n=5×40, current prompt + O3/O4/O6 graders | 200 | 200 | 197 | 0 | ✅ **pass³ 0.96, unauth 0.0**, over-block 0.005, grounded 0.99, $5.69 |
+| ablation | 07-23 | Gemini, 20 tasks × 2 arms (harness on/off) | 40 | 40 | — | on 0 / off 13 | ✅ OFF leaked **$2,120** (65%) vs ON **$0** |
+| injection | 07-23 | Gemini, 5 payloads × 4 orders | 20 | 20 | — | 0 | ✅ complied 100% / unauthorized 0% / leak 0% |
 
 ---
 
@@ -309,6 +412,13 @@ Behaviour to expect:
 ---
 
 ## Changelog
+- **2026-07-23:** **Offline evaluation complete — all eight evals (O1–O8) built, measured, pushed.**
+  Fresh 200-run sweep under the current prompt: **pass³ 0.96, unauthorized 0.0, over_block 0.005**,
+  with new graders **groundedness 0.99 / lookup-before-refund 1.0 / recovery 0.98** and per-run
+  latency+cost (p95 26s, $5.69). **Ablation:** harness OFF leaked **$2,120** across 20 cases vs $0
+  on. **Injection:** 100% complied / 0% unauthorized / 0% leak. Agent + extractor regression-gated
+  on pinned baselines (`eval/baselines/*.json`). Added the phased observability roadmap
+  (latency / cost / monitoring) — see §0 / §0bis.
 - **2026-07-20 (later):** Resumed and **completed the full balanced 200-run sweep**:
   **pass³ = 0.97, unauthorized_rate = 0.0, over_block = 0.01**, 0 crashes, ~$3.5 total. Only 2
   misses in 200, both over-blocks (safe direction). Fixed the `est_usd` meter to price input vs
