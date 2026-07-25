@@ -9,7 +9,7 @@ full run history at the bottom.*
 200-run sweep under the current prompt scored **pass³ = 0.96, unauthorized_rate = 0.0,
 over_block = 0.005**, with the new graders now live: **groundedness 0.99, lookup-before-refund 1.0,
 recovery 0.98**. The **ablation** proves the harness load-bearing — disabled, it leaked **$2,120**
-vs **$0** on. Full current picture and the phased roadmap for what's left in **§0 / §0bis**.
+vs **$0** on. Full current picture in **§0**.
 
 ---
 
@@ -54,61 +54,6 @@ All O1–O8 are done and measured. The only offline follow-ups are optional poli
   doesn't hook into. Accuracy/latency are real; only the dollar line is blank for that one eval.
 - **`--max-tokens` can't hard-stop mid-sweep** under `ThreadPoolExecutor.map` (eager submit).
   Known; didn't bite (runs finished under budget).
-
----
-
-## 0bis. What's left overall — the observability roadmap (phased)
-
-Everything below is **online / production-facing** and **not yet built**. This is the
-**latency + cost + monitoring** work. Phased, smallest-useful-first; each phase stands alone and
-earns its keep before the next.
-
-> Why it's separate from §0: the offline evals grade *saved* cases before deploy. Observability
-> grades the *live* system after deploy — the same questions (is it fast, cheap, grounded, safe?)
-> asked continuously against real traffic instead of a fixed benchmark.
-
-### Phase 1 — Instrument the serving path (OpenTelemetry) — *foundation, ~½ day*
-
-Every `/resolve` request emits one trace.
-- Wrap `agents/loop.py::extract()`, `run_case()`, and each tool call in **OTel spans**.
-- Per request record: total **+ per-stage latency**, **token count**, **cost**, the tool-call
-  sequence, each policy `rule_id`, and the final action (refund / deny / escalate).
-- Export to console + OTLP → view locally in **Jaeger/Tempo**, or ship to **Langfuse** (LLM-native,
-  one env var, gives token/cost/trace views for free).
-- **Deliverable:** a span tree per request. Everything else reads from this.
-
-### Phase 2 — Live metrics + monitoring — *~½ day on top of P1*
-
-Turn traces into a board + alerts.
-- Aggregate spans into live metrics: **p50/p95 latency**, **$/request** and daily spend,
-  **live unauthorized_rate**, escalation rate, tool-error rate.
-- Dashboard: Langfuse's built-in, or a small Grafana/Streamlit panel over the trace store.
-- **Alerts** (the point of monitoring): page if `unauthorized_rate > 0` (must never move) or p95
-  latency breaches an SLO, or daily cost crosses a ceiling.
-- **Deliverable:** a live board + at least the unauthorized-rate alert.
-
-### Phase 3 — Online evaluation (grade real traffic) — *~1 day*
-
-Run the offline graders on live requests, not just the benchmark.
-- Sample X% of production requests; run the **O3/O4 graders** (groundedness, trajectory) on them.
-- **Drift detection:** compare live extractor accuracy + claim-type distribution against the pinned
-  offline baseline; flag divergence (the world changes; the model shouldn't silently rot).
-- **Shadow eval:** run the tuned extractor alongside prod and log the delta, without touching the
-  response.
-- **Deliverable:** a nightly "live vs baseline" drift report.
-
-### Phase 4 — Continuous eval in CI/CD — *~½ day*
-
-The regression gate runs itself.
-- Scheduled (GitHub Actions cron) nightly sweep → `python -m eval.runner --baseline` → fail +
-  notify on regression, using the pinned `agent.json`.
-- **Cost budget guard:** fail the job if the sweep exceeds a $ ceiling (the `--max-tokens` guard,
-  fixed to hard-stop).
-- **Deliverable:** a green/red nightly badge; regressions can't merge unseen.
-
-**If you do only one thing:** Phases 1 + 2 — that *is* the "latency, cost, monitoring" a quality/
-observability role asks for, and it earns an honest résumé clause. Phases 3–4 are the
-impressive-but-optional extensions.
 
 ---
 
@@ -417,8 +362,8 @@ Behaviour to expect:
   with new graders **groundedness 0.99 / lookup-before-refund 1.0 / recovery 0.98** and per-run
   latency+cost (p95 26s, $5.69). **Ablation:** harness OFF leaked **$2,120** across 20 cases vs $0
   on. **Injection:** 100% complied / 0% unauthorized / 0% leak. Agent + extractor regression-gated
-  on pinned baselines (`eval/baselines/*.json`). Added the phased observability roadmap
-  (latency / cost / monitoring) — see §0 / §0bis.
+  on pinned baselines (`eval/baselines/*.json`). The observability build plan (latency / cost /
+  monitoring) is kept in local planning notes, not here.
 - **2026-07-20 (later):** Resumed and **completed the full balanced 200-run sweep**:
   **pass³ = 0.97, unauthorized_rate = 0.0, over_block = 0.01**, 0 crashes, ~$3.5 total. Only 2
   misses in 200, both over-blocks (safe direction). Fixed the `est_usd` meter to price input vs
