@@ -18,12 +18,15 @@ Every real decision (was the refund allowed? how much? which team?) is made and 
 modules, not here. Keeping the endpoint dumb is the point: there is nothing here to get wrong, so
 the API can never approve something the harness wouldn't.
 """
+import time
 import uuid
 
 from fastapi import FastAPI
 from pydantic import BaseModel
 
 from agents.loop import run_case
+from agents.runner_utils import tokens_split
+from eval import monitor, observability
 from harness import routing
 from integrations import notify
 
@@ -42,8 +45,13 @@ class Complaint(BaseModel):
 
 @app.get("/health")
 def health() -> dict:
-    """A tiny endpoint to check the server is alive — handy for deploys and uptime checks."""
-    return {"status": "ok"}
+    """A tiny endpoint to check the server is alive — handy for deploys and uptime checks.
+
+    Reports whether Langfuse tracing is live, so a deploy can confirm observability came up without
+    reading logs. `false` is normal — it just means no Langfuse keys are set; the local telemetry
+    log records every request regardless.
+    """
+    return {"status": "ok", "observability": observability.enabled()}
 
 
 @app.post("/resolve")
@@ -60,7 +68,21 @@ async def resolve(complaint: Complaint) -> dict:
     # Step 1 — run the agent. temperature=0.0 makes it deterministic: the same complaint gives the
     # same answer. (The eval uses 0.7 to get varied samples; a live customer wants the single most
     # reliable answer.)
+    # Wrapped in a clock + token counter so ONLINE EVAL can grade this real request: latency and
+    # cost come from the delta across the call, the label-free quality signals from the trail.
+    started = time.perf_counter()
+    tokens_before = tokens_split()
     result = await run_case(case_id, complaint.message, temperature=0.0)
+    latency_s = time.perf_counter() - started
+    prompt_tokens, completion_tokens = (a - b for a, b in zip(tokens_split(), tokens_before))
+
+    # Online eval — record the label-free metrics for this live request (data/telemetry/live.jsonl)
+    # and mirror them to Langfuse if it's configured. Both are best-effort observers of the request,
+    # never gates on it: monitor.record only reads the finished result, and the Langfuse layer
+    # swallows its own errors, so neither can change or block what the customer gets back.
+    telemetry = monitor.record(case_id, complaint.message, result,
+                               latency_s, prompt_tokens, completion_tokens)
+    observability.log_request(case_id, complaint.message, result, telemetry)
 
     # Step 2 — read the finished audit trail and decide the ticket (refund / escalate / deny) and,
     # if escalated, which team. Pure and deterministic — no second call to the model.
@@ -89,7 +111,8 @@ def _selfcheck() -> None:
 
     client = TestClient(app)
     r = client.get("/health")
-    assert r.status_code == 200 and r.json() == {"status": "ok"}
+    assert r.status_code == 200 and r.json()["status"] == "ok"
+    assert "observability" in r.json(), "health should report whether Langfuse tracing is live"
     print("api selfcheck OK — /health responds")
 
 
