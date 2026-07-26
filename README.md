@@ -8,9 +8,19 @@
 [![Google ADK](https://img.shields.io/badge/Google_ADK-Extractor-4285F4?style=flat-square&logo=google&logoColor=white)](https://google.github.io/adk-docs/)
 [![litellm](https://img.shields.io/badge/litellm-Groq·OpenRouter·Gemini-F55036?style=flat-square)](https://litellm.ai)
 [![FastAPI](https://img.shields.io/badge/FastAPI-/resolve-009688?style=flat-square&logo=fastapi&logoColor=white)](https://fastapi.tiangolo.com)
-[![eval](https://img.shields.io/badge/pass%5E3-0.97-EE4C2C?style=flat-square)](EVAL_REPORT.md)
+![eval](https://img.shields.io/badge/pass%5E3-0.96-EE4C2C?style=flat-square)
 
 *A customer lies about how much they paid. The agent looks up the real figure, the policy engine refuses the inflated refund, and the agent recovers with the exact amount owed — every step of it in an audit trail that the benchmark then grades.*
+
+</div>
+
+---
+
+<div align="center">
+
+![Resolv demo — the harness refusing an inflated refund](docs/demo.png)
+
+<sub>An adversarial late-delivery claim ($603.52 paid → demands $900, threatens legal action). The record shows the order arrived <em>early</em>, so the policy engine denies the refund and the agent escalates to a human — it cannot pay out what the harness refuses. Left: the internal trail, streamed live. Right: what the customer receives.</sub>
 
 </div>
 
@@ -86,7 +96,7 @@ Not "can the agent resolve a complaint," but **"can it do so reliably, against a
 | reply_grounded_rate | 0.99 | the reply to the customer matched the audit trail |
 | lookup_before_refund / recovery | 1.0 / 0.98 | always read the order first; recovered after a refusal |
 
-Tasks are sampled to a verified 50/50 refund/deny split, so a constant policy ("deny everything") scores 0.50 — the numbers are earned, not degenerate. The single error in 200 runs was an **over-block**: the agent refused someone who was owed money, and never paid someone who wasn't. That asymmetry is the direction a refund system should fail in. The scorecard is reproducible from the pinned baseline in [`eval/baselines/agent.json`](eval/baselines/agent.json); per-tactic breakdown and run history in **[EVAL_REPORT.md](EVAL_REPORT.md)**.
+Tasks are sampled to a verified 50/50 refund/deny split, so a constant policy ("deny everything") scores 0.50 — the numbers are earned, not degenerate. The single error in 200 runs was an **over-block**: the agent refused someone who was owed money, and never paid someone who wasn't. That asymmetry is the direction a refund system should fail in. The scorecard is reproducible from the pinned baseline in [`eval/baselines/agent.json`](eval/baselines/agent.json).
 
 ### The eval suite around that headline
 
@@ -102,7 +112,7 @@ The end-to-end sweep is one of several checks; each isolates a failure the headl
 | **trajectory** (in `runner.py`) | looked up the order before refunding; recovered after a refusal | free |
 | **regression gate** (`--baseline`) | McNemar / 2-SE paired check vs a pinned run; zero tolerance on new unauthorized refunds | free |
 
-The **deterministic half** — every policy rule, the harness, the scoring math, and the graders above — is 217 tests gated in CI, no API key. The **stochastic half** (extractor, injection, ablation) needs a provider key and is run on demand.
+The **deterministic half** — every policy rule, the harness, the scoring math, and the graders above — is 240 tests gated in CI, no API key. The **stochastic half** (extractor, injection, ablation) needs a provider key and is run on demand.
 
 ---
 
@@ -147,7 +157,7 @@ pip install -r requirements.txt
 cp .env.example .env                        # add one provider key
 
 # The deterministic core — no API key needed:
-pytest -q                       # 217 tests: policy rules, harness, eval math + graders
+pytest -q                       # 240 tests: policy rules, harness, eval math + graders
 python -m harness.policy        # the 7 rules, against the real order DB
 python -m eval.metrics          # the scoring math, checked against hand-worked numbers
 
@@ -175,4 +185,4 @@ Stated plainly, because a demo that hides its edges is not evidence.
 - **Delivery is mocked.** [`integrations/notify.py`](integrations/notify.py) writes the customer ticket and team page to files under `data/outbox/`. Real SMTP and a ticketing API are credentials and retry logic, not evidence about the decision layer.
 - **The clock is pinned.** Olist is 2016–2018 data, so `policy.NOW` is fixed just after the last order; otherwise the claim-window rule would deny everything and prove nothing.
 - **The fine-tuned adapter is not served** — see above.
-- **Free tiers cannot run the sweep.** A full pass^k sweep is ~1,500 model calls and 4–6M tokens; Groq's free tier caps at 100k tokens/day. The published run cost roughly $3.50 on Gemini Flash.
+- **Free tiers cannot run the sweep.** A full pass^k sweep is ~1,500 model calls and ~1.9M tokens; Groq's free tier caps at 100k tokens/day. The published run cost roughly $5.69 on Gemini Flash.

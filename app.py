@@ -25,11 +25,14 @@ sans font are pinned in .streamlit/config.toml so it renders identically for eve
 Runs the real pipeline at temperature 0.0, so what streams here is what api/main.py would return.
 """
 import asyncio
+import time
 import uuid
 
 import streamlit as st
 
 from agents.loop import run_case_events
+from agents.runner_utils import tokens_split
+from eval import monitor, observability
 from harness import audit, routing
 from integrations import notify
 
@@ -109,7 +112,12 @@ if go and message.strip():
         st.subheader("What happened inside")                             # level 2
         st.caption("Each step appears as it happens. Colour is the policy verdict.")
 
+        # Wrap the run in the same clock + token counter the /resolve endpoint uses, so a demo
+        # click produces the identical online-eval telemetry (and Langfuse trace) a real request
+        # would — the demo isn't a second code path, it's the serving path with a live view.
         result = None
+        started = time.perf_counter()
+        tokens_before = tokens_split()
         for event in drain(run_case_events(case_id, message, temperature=0.0)):
             kind = event["type"]
             if kind == "intake":
@@ -127,6 +135,15 @@ if go and message.strip():
                 render_verdict(event["record"])
             elif kind == "done":
                 result = event["result"]
+
+        # Record the label-free online-eval metrics and mirror them to Langfuse, exactly as
+        # api/main.py does — best-effort observers, both no-ops without their keys/config.
+        if result is not None:
+            latency_s = time.perf_counter() - started
+            prompt_tokens, completion_tokens = (a - b for a, b in zip(tokens_split(), tokens_before))
+            telemetry = monitor.record(case_id, message, result,
+                                        latency_s, prompt_tokens, completion_tokens)
+            observability.log_request(case_id, message, result, telemetry)
 
     # ---- RIGHT: what the customer gets, once the audit above is complete ----------------------
     with right:

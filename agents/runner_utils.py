@@ -75,8 +75,8 @@ def _retry_after(error: Exception) -> float:
 def complete(**kwargs):
     """litellm.completion() with the provider's rate limit survived rather than raised.
 
-    RATE LIMITS ARE THE BINDING CONSTRAINT ON THIS PROJECT, not a rare edge case — see
-    EVAL_REPORT.md §4. A pass^k sweep is thousands of calls, and free tiers meter hard: Groq at
+    RATE LIMITS ARE THE BINDING CONSTRAINT ON THIS PROJECT, not a rare edge case.
+    A pass^k sweep is thousands of calls, and free tiers meter hard: Groq at
     12k tokens/min AND 100k tokens/DAY per org; OpenRouter free at ~50 req/day per account plus
     congested upstream endpoints. Without this wrapper the first sweep recorded rate-limit errors
     for 191 of 200 runs and scored the agent 0.0 — a number about billing, not about the agent.
