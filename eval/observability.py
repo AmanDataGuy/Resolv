@@ -15,6 +15,7 @@ Setup (once): pip install "langfuse<3", then set LANGFUSE_PUBLIC_KEY / LANGFUSE_
 LANGFUSE_HOST for self-hosted) in .env. Without them this module does nothing, by design.
 """
 import os
+from datetime import datetime, timedelta, timezone
 from functools import lru_cache
 
 
@@ -63,6 +64,25 @@ def log_request(case_id: str, message: str, result: dict, metrics: dict) -> None
                 "tokens": metrics.get("tokens"),
                 "rules_hit": metrics.get("rules_hit"),
             },
+        )
+        # A generation observation is what Langfuse reads to populate the cost + latency dashboards
+        # (trace metadata alone is just displayed JSON, it doesn't feed those charts). We pass the
+        # cost we already computed as total_cost — Langfuse has no price table for our litellm model
+        # string, so an explicit cost is what makes "Model costs" show anything. Latency comes from
+        # start/end, reconstructed from the measured latency_s (the request is already over here).
+        from config import MODEL
+
+        end = datetime.now(timezone.utc)
+        start = end - timedelta(seconds=metrics.get("latency_s") or 0.0)
+        trace.generation(
+            name="resolve-llm",
+            model=MODEL,
+            input={"message": message},
+            output={"reply": result.get("reply")},
+            start_time=start,
+            end_time=end,
+            usage={"total": metrics.get("tokens"), "unit": "TOKENS",
+                   "total_cost": metrics.get("usd")},
         )
         # Booleans become 0/1 scores so they chart as rates in the Langfuse UI. unauthorized is the
         # one to alert on there — same meaning as everywhere else in the project.
