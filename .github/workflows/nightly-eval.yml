@@ -1,0 +1,48 @@
+# Nightly eval regression gate — Phase 4.
+#
+# ci.yml runs the FREE, deterministic half (lint + the harness/eval-math tests) on every push, with
+# no API key. THIS workflow runs the model-gated half: it exercises the real LLM against the pinned
+# baselines and fails the build on regression. Because that costs real LLM calls, it runs on a
+# schedule (not every push) and ONLY when a key is provided.
+#
+# BILLING — READ THIS: the model steps run only if a `GEMINI_API_KEY` repository secret exists.
+# Without it they skip and the job passes green (nothing to gate). Use YOUR OWN paid key here — never
+# a borrowed one — because a scheduled run spends real money every night.
+name: Nightly eval gate
+
+on:
+  schedule:
+    - cron: "0 6 * * *"        # 06:00 UTC daily
+  workflow_dispatch: {}         # ...and a manual "Run workflow" button
+
+jobs:
+  eval-gate:
+    runs-on: ubuntu-latest
+    env:
+      HAVE_KEY: ${{ secrets.GEMINI_API_KEY != '' }}
+      USE_GEMINI: "1"           # native ADK Gemini path — no litellm, no warning (config.get_model)
+      GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+      - run: pip install -r requirements.txt
+
+      - name: Skip notice (no key)
+        if: env.HAVE_KEY != 'true'
+        run: echo "No GEMINI_API_KEY secret set — model-gated eval skipped. Add your own paid key to enable."
+
+      # The cheap, meaningful nightly gate: the extractor eval over the held-out split, McNemar-tested
+      # against the pinned baseline (eval/baselines/extractor.json). Fails (exit 1) on a significant
+      # accuracy drop OR any rise in hallucination. ~92 single-shot calls — cents, not dollars.
+      - name: Extractor regression gate
+        if: env.HAVE_KEY == 'true'
+        run: python -m eval.extractor --baseline
+
+      # To also gate the full agent sweep (pass^k, unauthorized) on a manual run, add a step:
+      #   - name: Agent sweep gate
+      #     if: env.HAVE_KEY == 'true'
+      #     run: python -m eval.runner --baseline          # full 40x5 ~ $5-6
+      #     # or a cheap smoke: python -m eval.runner --tasks 8 --n 2 --k 1 --baseline
