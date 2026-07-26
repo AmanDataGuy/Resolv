@@ -32,7 +32,7 @@ ADK still runs the extractor, where output_schema is exactly the right tool for 
 """
 import json
 
-from agents.extractor import extractor_agent
+from agents.extractor import get_extractor_agent
 from agents.runner_utils import complete, run_agent_once
 from config import MODEL
 from harness import audit, tools
@@ -134,7 +134,7 @@ def _bind(case_id: str) -> dict:
 
 async def extract(message: str) -> dict:
     """Stage 1: messy message -> {order_id, claim_type}. The fine-tuned model's job."""
-    return await run_agent_once(extractor_agent, message, "customer_claim")
+    return await run_agent_once(get_extractor_agent(), message, "customer_claim")
 
 
 async def run_case_events(case_id: str, message: str, temperature: float = 0.7, user=None):

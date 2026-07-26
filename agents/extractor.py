@@ -10,16 +10,28 @@ Its output is verified downstream by harness/validity.py against the order recor
 is never trusted for the numbers — only for reading. If the customer gives no usable order
 number, the correct output is order_id = null, NOT an invented one.
 """
+from functools import lru_cache
+
 from google.adk.agents import LlmAgent
 
 from config import get_model
 from schemas import CustomerClaim
 
-extractor_agent = LlmAgent(
-    name="claim_extractor",
-    model=get_model(),
-    description="Extracts a structured claim (order id + claim type) from a messy customer message.",
-    instruction="""
+
+@lru_cache(maxsize=1)
+def get_extractor_agent() -> LlmAgent:
+    """Build the extractor agent on first use, not at import.
+
+    Deferred behind a function so importing this module never calls get_model(). The keyless
+    test suite imports the pipeline (agents.loop -> here) to test the deterministic harness
+    around it, but never runs the agent — so it must not need a provider key just to collect.
+    ponytail: lru_cache makes this a one-time singleton, same object every call.
+    """
+    return LlmAgent(
+        name="claim_extractor",
+        model=get_model(),
+        description="Extracts a structured claim (order id + claim type) from a messy customer message.",
+        instruction="""
 You read a customer's support message and extract two things.
 
 order_id: the order number the customer refers to, in the form "ORD-####".
@@ -37,6 +49,6 @@ claim_type: what the customer is complaining about — exactly one of:
 Do not judge whether the claim is true — only extract what the customer is asserting. The
 verification happens elsewhere.
 """,
-    output_schema=CustomerClaim,
-    output_key="customer_claim",
-)
+        output_schema=CustomerClaim,
+        output_key="customer_claim",
+    )
