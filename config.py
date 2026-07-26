@@ -32,7 +32,7 @@ GEMINI_MODEL_LITE = "gemini-3.1-flash-lite"
 # is (default litellm model, the env var litellm reads the API key from).
 #
 #   groq       — fastest, but free tier caps at 100k tokens/DAY/org. Fine for small runs; a full
-#                200-run pass^k sweep needs ~4-6M tokens and does not fit. See EVAL_REPORT.md §4.
+#                200-run pass^k sweep needs millions of tokens and does not fit.
 #   openrouter — one API over many providers. Free (:free) models are capped at ~50 req/DAY per
 #                ACCOUNT (not per key — three keys on one account share it) and their upstream
 #                endpoints are congested. ~$10 of credit lifts this to 1000 req/day AND unlocks
