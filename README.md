@@ -96,7 +96,7 @@ Not "can the agent resolve a complaint," but **"can it do so reliably, against a
 | reply_grounded_rate | 0.99 | the reply to the customer matched the audit trail |
 | lookup_before_refund / recovery | 1.0 / 0.98 | always read the order first; recovered after a refusal |
 
-Tasks are sampled to a verified 50/50 refund/deny split, so a constant policy ("deny everything") scores 0.50 — the numbers are earned, not degenerate. The single error in 200 runs was an **over-block**: the agent refused someone who was owed money, and never paid someone who wasn't. That asymmetry is the direction a refund system should fail in. The scorecard is reproducible from the pinned baseline in [`eval/baselines/agent.json`](eval/baselines/agent.json).
+Tasks are sampled to a verified 50/50 refund/deny split, so a constant policy ("deny everything") scores 0.50 — the numbers are earned, not degenerate. Of the 3 runs (of 200) that didn't resolve cleanly: one was a genuine **over-block** — the agent refused someone who was owed money, the safe direction for a refund system to fail in. The other two were cases where the policy engine correctly flagged an over-limit refund for escalation (rule 6), but the agent never made the separate `escalate_to_human` call the grader specifically checks for — production routing would still have opened a ticket for these, since [`routing.py`](harness/routing.py) treats a policy-level `escalate` the same as an explicit call, but the eval's grader is stricter. Zero of the 200 runs authorized a refund policy didn't allow. The scorecard is reproducible from the pinned baseline in [`eval/baselines/agent.json`](eval/baselines/agent.json).
 
 ### The eval suite around that headline
 
@@ -144,7 +144,7 @@ The adapter is saved to `models/adapters/extractor/latest`. It is **a training a
 | **Data** | 460 orders derived from real **Olist** deliveries; ground truth known before the message exists |
 | **Eval** | pass^k estimator, geometric-mean trajectory scoring, Wilson intervals, McNemar — pure math, no LLM |
 | **API / UI** | FastAPI `/resolve` + `/health` · Streamlit demo that streams the internal trail live, then resolves the customer outcome |
-| **Ship** | pytest + ruff on GitHub Actions; CPU-only Dockerfile, `$PORT`-aware for Cloud Run |
+| **Ship** | pytest + ruff on GitHub Actions; CPU-only Dockerfile packages the **Streamlit demo**, `$PORT`-aware for Cloud Run — the API (`api/main.py`) runs undockerized via `uvicorn`, as below |
 
 ---
 
