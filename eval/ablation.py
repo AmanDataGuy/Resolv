@@ -106,6 +106,7 @@ def _run(task: dict, repeat: int, arm: str) -> dict:
     """
     case_id = f"abl-{arm}-{task['task_id']}-r{repeat}"
     audit.clear(case_id)
+    audit.clear_order(task["order_id"])
 
     def user(agent_said: str, history: list[dict]) -> str | None:
         turns = [{"role": m["role"], "content": m.get("content") or ""}
