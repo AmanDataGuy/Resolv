@@ -54,6 +54,19 @@ def _pick(situation: str, in_window: bool | None = None, over_limit: bool = Fals
     pytest.skip(f"no order matches situation={situation} in_window={in_window} over_limit={over_limit}")
 
 
+@pytest.fixture(autouse=True)
+def _isolated_order_index(tmp_path, monkeypatch):
+    """Redirect audit.ORDER_DIR to a fresh temp dir for every test in this module.
+
+    Several tests below pick a real order via _pick(), which is deterministic — the same order
+    every time within a run. Since rule 4 now checks a cross-case order-level index (2026-08-15
+    fix), two different tests that happen to pick the same real order would otherwise see each
+    other's refunds and fail for a reason that has nothing to do with what they're testing. Same
+    pattern tests/test_monitor.py already uses for TELEMETRY.
+    """
+    monkeypatch.setattr(audit, "ORDER_DIR", tmp_path / "_by_order")
+
+
 @pytest.fixture
 def case(request):
     """A private, empty audit trail per test — cleaned up either side so runs can't bleed."""
