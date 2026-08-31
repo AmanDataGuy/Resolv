@@ -20,9 +20,20 @@ DB. The trail IS the state: rule 4 reads it to answer "already refunded?", the e
 it, the UI renders it. One source of truth, append-only, and what the eval grades is the same
 thing production would act on.
 """
+import threading
+
 from harness import audit
 from harness.policy import Decision, check_refund
 from harness.validity import get_order
+
+# Guards the read-history -> check_refund -> append sequence in issue_refund(). Without it,
+# concurrent calls on the same case can all read the trail before any of them appends, so more
+# than one clears rule 4 — reproduced directly in the 2026-08-15 audit (7 of 8 concurrent calls
+# refunded the same order once each). A single process-wide lock, not a per-case_id registry:
+# at this scale the throughput cost is unmeasurable and a global lock has no lifecycle to manage.
+# This protects one process only — see plan_ahead.md Priority 2 for why a multi-instance
+# deployment needs a real datastore instead, which this lock does not and cannot provide.
+_refund_lock = threading.Lock()
 
 # Every tool returns a plain string. Tool results land back in a language model's context, so a
 # sentence it can act on beats a dict it has to interpret — and the structured version of the
@@ -72,23 +83,31 @@ def issue_refund(case_id: str, order_id: str, claim_type: str, amount_usd: float
 
     Check, then record, then act — and the record is written for denials and escalations too.
     An attempt that was stopped is the most informative line in the trail.
+
+    HISTORY IS THE UNION OF TWO SCOPES. audit.read(case_id) is what happened in THIS conversation;
+    audit.order_history(order_id) is every successful refund this order has EVER received, in any
+    conversation. Rule 4 needs both — a customer who contacts support twice, in two separate,
+    honest cases, must not be paid twice. The whole read-check-append sequence runs under a lock:
+    without it, concurrent calls on the same case can all read the history before any of them
+    appends, and more than one clears rule 4 (see _refund_lock above).
     """
-    history = audit.read(case_id)
-    decision = check_refund(order_id, claim_type, amount_usd, history)
+    with _refund_lock:
+        history = audit.read(case_id) + audit.order_history(order_id)
+        decision = check_refund(order_id, claim_type, amount_usd, history)
 
-    ok = decision.action == "allow"
-    if ok:
-        result = f"Refunded ${amount_usd:.2f} on {order_id}."
-    elif decision.action == "escalate":
-        result = f"Not refunded — sent to a human for approval. {decision.reason}"
-    else:
-        result = f"Refused: {decision.reason}"
+        ok = decision.action == "allow"
+        if ok:
+            result = f"Refunded ${amount_usd:.2f} on {order_id}."
+        elif decision.action == "escalate":
+            result = f"Not refunded — sent to a human for approval. {decision.reason}"
+        else:
+            result = f"Refused: {decision.reason}"
 
-    audit.append(
-        case_id, "issue_refund", order_id,
-        {"amount_usd": amount_usd, "claim_type": claim_type},
-        decision, ok, result,
-    )
+        audit.append(
+            case_id, "issue_refund", order_id,
+            {"amount_usd": amount_usd, "claim_type": claim_type},
+            decision, ok, result,
+        )
     return result
 
 
@@ -132,6 +151,12 @@ def demo() -> None:
         if o["situation"] == "late" and (NOW - date.fromisoformat(o["promised_date"])).days <= CLAIM_WINDOW_DAYS
     )
     oid = fresh["order_id"]
+    # This demo issues a real refund on a real order below (line ~170) — the order index (which
+    # rule 4 now reads across cases, 2026-08-15 fix) must be reset before AND after, or this demo
+    # leaks a permanent "already refunded" record into a real order's history, and running it
+    # twice — or running it before anything else that touches this same order — fails for a
+    # reason that has nothing to do with what this demo is checking.
+    audit.clear_order(oid)
 
     # lookup exposes the true amount — the antidote to whatever figure the customer states
     assert f"${fresh['amount_usd']:.2f}" in lookup_order(case, oid)
@@ -162,6 +187,7 @@ def demo() -> None:
     trail = audit.read(case)
     assert len(trail) == 6, f"expected 6 recorded attempts, got {len(trail)}"
     audit.clear(case)
+    audit.clear_order(oid)
     print(f"tools demo OK — {len(TOOLS)} tools, every mutation policy-checked, {len(trail)} attempts recorded")
 
 
