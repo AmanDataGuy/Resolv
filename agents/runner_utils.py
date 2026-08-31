@@ -2,16 +2,14 @@
 
 Real ADK usage (confirmed against github.com/mayank953/Youtube/tree/main/ADK) always
 goes through a Runner + SessionService + a Content message, then reads the final
-event's text. That's ~15 lines of boilerplate every time you call an agent. Since
-Resolv calls six different agents back-to-back in a fixed pipeline (see
-agents/orchestrator.py), this file wraps that boilerplate once.
+event's text. That's ~15 lines of boilerplate every time you call an agent. Resolv
+calls exactly one ADK agent — the extractor (agents/extractor.py) — but this wrapper
+still earns its place: it's also where the rate-limit-survival logic (key rotation,
+wait-and-retry) lives, shared with agents/loop.py's litellm-based complete().
 
-Each call creates a *fresh* in-memory session. Agents in this pipeline are single-shot
-(classify this one event, assess this one impact) — they don't need multi-turn
-conversation memory between pipeline stages. The stages pass data to each other as
-plain Python dicts, not via shared ADK session state.
+Each call creates a *fresh* in-memory session. The extractor is single-shot (classify
+this one message), so it doesn't need multi-turn conversation memory between calls.
 """
-import json
 import random
 import re
 import time
@@ -52,9 +50,20 @@ def _is_rate_limit_error(error: Exception) -> bool:
     _ResourceExhaustedError, while Groq (through litellm) raises litellm.RateLimitError
     or a plain exception with "429"/"rate limit" in the message depending on version.
     Matching on the message is the only thing that reliably works across both.
+
+    "too many requests" is also matched for OpenRouter, the third documented provider
+    (config.py) — its exact error text hasn't been confirmed against a live 429 in this
+    codebase (no OpenRouter key was available to trigger one during the 2026-08-15 audit),
+    so this is a best-effort widening, not a verified match. Confirm it the next time a
+    real sweep runs against OpenRouter under rate-limit pressure.
     """
     message = str(error).lower()
-    return "429" in message or "rate limit" in message or "resource_exhausted" in message
+    return (
+        "429" in message
+        or "rate limit" in message
+        or "resource_exhausted" in message
+        or "too many requests" in message
+    )
 
 
 def _retry_after(error: Exception) -> float:
@@ -171,8 +180,3 @@ async def run_agent_once(agent, prompt_text: str, output_key: str | None = None)
         return updated_session.state.get(output_key, {})
 
     return final_text
-
-
-def to_prompt(data: dict) -> str:
-    """Serializes a dict to a JSON string agents can read as their input message."""
-    return json.dumps(data, default=str)
