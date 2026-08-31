@@ -16,15 +16,15 @@ here:
      env-overridable and visible in one spot rather than buried in the rules.
 """
 import os
+import threading
+
 from dotenv import load_dotenv
 
 load_dotenv()
 
 # Gemini 2.0 Flash was shut down 2026-06-01 and 2.5 Flash retires 2026-10-16, so the
-# live path targets 3.5 Flash (released 2026-05-19). Flash-Lite is the cheaper/faster
-# tier — useful if a high-volume caller ever needs it.
+# live path targets 3.5 Flash (released 2026-05-19).
 GEMINI_MODEL_FAST = "gemini-3.5-flash"
-GEMINI_MODEL_LITE = "gemini-3.1-flash-lite"
 
 # --- Provider selection --------------------------------------------------------------------
 # Two hosted providers reach the same open models through litellm; the harness is deliberately
@@ -65,7 +65,6 @@ _DEFAULT_MODEL, _KEY_ENV = _PROVIDERS[LLM_PROVIDER]
 # The one model string every litellm call uses. Override per-run with LLM_MODEL — e.g.
 #   LLM_MODEL=openrouter/meta-llama/llama-3.3-70b-instruct python -m eval.runner
 MODEL = os.environ.get("LLM_MODEL") or _DEFAULT_MODEL
-GROQ_MODEL = _PROVIDERS["groq"][0]  # kept for callers/tests that name Groq explicitly
 
 # Key rotation over <PROVIDER>_API_KEY, _2, _3. litellm reads os.environ[_KEY_ENV] fresh each
 # request, so rotating the value there is enough to move the next call to a different key.
@@ -82,9 +81,12 @@ _key_index = 0
 if _KEYS:
     os.environ[_KEY_ENV] = _KEYS[0]  # pin to the first key so rotation has a known start
 
-
-def key_count() -> int:
-    return len(_KEYS)
+# Guards _key_index and the os.environ write in rotate_key()/reset_key(). eval/runner.py stays
+# at WORKERS=1 specifically because this state used to be unprotected (2026-08-15 audit); this
+# lock is the actual fix, so any current or future caller that fans out (eval/extractor.py runs
+# WORKERS=4, and calls this on every rate-limit retry) can't race on it instead of relying on
+# every caller remembering to stay serial.
+_key_lock = threading.Lock()
 
 
 def rotate_key() -> bool:
@@ -92,11 +94,12 @@ def rotate_key() -> bool:
     stops retrying and raises, or waits and reset_key()s to start the cycle again).
     """
     global _key_index
-    _key_index += 1
-    if _key_index >= len(_KEYS):
-        return False
-    os.environ[_KEY_ENV] = _KEYS[_key_index]
-    return True
+    with _key_lock:
+        _key_index += 1
+        if _key_index >= len(_KEYS):
+            return False
+        os.environ[_KEY_ENV] = _KEYS[_key_index]
+        return True
 
 
 def reset_key() -> None:
@@ -107,9 +110,10 @@ def reset_key() -> None:
     again — without this, the first crowded minute would permanently burn every key.
     """
     global _key_index
-    _key_index = 0
-    if _KEYS:
-        os.environ[_KEY_ENV] = _KEYS[0]
+    with _key_lock:
+        _key_index = 0
+        if _KEYS:
+            os.environ[_KEY_ENV] = _KEYS[0]
 
 
 def get_model():
