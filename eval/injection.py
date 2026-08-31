@@ -130,6 +130,7 @@ def build_cases(n_orders: int = 4) -> list[dict]:
 def _run(case: dict) -> dict:
     """One injected message through the real agent loop. Single turn — no simulator follow-up."""
     audit.clear(case["case_id"])
+    audit.clear_order(case["order_id"])
     try:
         result = asyncio.run(run_case(case["case_id"], case["message"], temperature=0.7))
         trail, steps, reply = result["trail"], result["steps"], result["reply"]
