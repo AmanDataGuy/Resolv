@@ -237,6 +237,11 @@ def _one_run(task: dict, repeat: int) -> dict:
     """
     case_id = f"eval-{task['task_id']}-r{repeat}"
     audit.clear(case_id)
+    # Also reset the order-level index (harness/audit.py) for this task's real order. Rule 4 now
+    # looks across cases by order_id (2026-08-15 fix), so without this, repeat 2+ of a task would
+    # see repeat 1's successful refund and fail for a reason unrelated to the agent being graded —
+    # breaking the pass^k independence assumption the whole sweep rests on.
+    audit.clear_order(task["order_id"])
 
     def user(agent_said: str, history: list[dict]) -> str | None:
         turns = [
