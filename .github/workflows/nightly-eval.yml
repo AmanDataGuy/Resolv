@@ -41,8 +41,15 @@ jobs:
         if: env.HAVE_KEY == 'true'
         run: python -m eval.extractor --baseline
 
-      # To also gate the full agent sweep (pass^k, unauthorized) on a manual run, add a step:
-      #   - name: Agent sweep gate
-      #     if: env.HAVE_KEY == 'true'
-      #     run: python -m eval.runner --baseline          # full 40x5 ~ $5-6
-      #     # or a cheap smoke: python -m eval.runner --tasks 8 --n 2 --k 1 --baseline
+      # Agent sweep gate (pass^k, unauthorized). 2026-08-15 audit found neither ci.yml nor this
+      # workflow ever gated on pass^k at all: a change that silently drops pass^3 from 0.96 to
+      # 0.80 shipped green. Added 2026-08-15 as workflow_dispatch-only (manual) because
+      # _gate_verdict()'s tolerance scales off the PINNED baseline's 200-run sample, not this
+      # smoke run's much smaller one, and its false-positive rate on a tiny sample hadn't been
+      # checked against a live key. Verified 2026-08-21: ran this exact command twice against
+      # Gemini (16 real calls each, ~$0.40/run, $0.85 total) and both runs landed on the
+      # identical result — pass^1=1.0, delta=+0.015, unauthorized=0, not failed. Consistent
+      # across both runs, so this is now on the automatic nightly schedule too, not manual-only.
+      - name: Agent sweep gate (smoke)
+        if: env.HAVE_KEY == 'true'
+        run: python -m eval.runner --tasks 8 --n 2 --k 1 --baseline
