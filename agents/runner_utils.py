@@ -164,6 +164,17 @@ async def run_agent_once(agent, prompt_text: str, output_key: str | None = None)
             ):
                 if event.is_final_response() and event.content and event.content.parts:
                     final_text = event.content.parts[0].text or ""
+                    # ADK's Event carries the same usage_metadata shape genai's
+                    # GenerateContentResponse does. complete() (below) tracks litellm calls into
+                    # this same counter; before this, the extractor's ADK call was invisible to
+                    # every cost estimate in eval/ -- tracked only on the final chunk, matching
+                    # the one final_text assignment above, so a multi-chunk stream isn't
+                    # double-counted.
+                    usage = getattr(event, "usage_metadata", None)
+                    if usage is not None:
+                        global _prompt_tokens, _completion_tokens
+                        _prompt_tokens += getattr(usage, "prompt_token_count", 0) or 0
+                        _completion_tokens += getattr(usage, "candidates_token_count", 0) or 0
             break
         except Exception as error:
             attempts_left -= 1
