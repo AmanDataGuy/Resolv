@@ -11,3 +11,8 @@ font = "sans serif"
 [server]
 # The demo takes typed input; no need to phone home with usage stats.
 gatherUsageStats = false
+# Source files never change while a deployed container is running -- the hot-reload watcher
+# (watchdog/inotify) is a dev-only convenience that only burns a scarce kernel resource here.
+# Render's free-tier containers hit a low inotify-instance ceiling under it ("OSError: [Errno 24]
+# inotify instance limit reached"); "none" turns the watcher off entirely instead of tuning it.
+fileWatcherType = "none"
