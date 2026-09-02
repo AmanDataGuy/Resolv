@@ -7,7 +7,15 @@ python-dotenv
 litellm
 tqdm              # eval sweep progress bar (eval/runner.py)
 langfuse>=2,<3    # OPTIONAL online-eval tracing (eval/observability.py); no-op without keys
-deepeval          # OPTIONAL, only for eval/quality.py's GEval tone metric
+deepeval==4.2.0   # OPTIONAL, only for eval/quality.py's GEval tone metric.
+                  # PINNED: unpinned, CI resolved a newer release whose bundled (unused) OpenAI/
+                  # Azure model wrapper eagerly imports `langchain` without declaring it as a real
+                  # dependency, crashing `pytest -q` on a fresh install with
+                  # ModuleNotFoundError: No module named 'langchain'. This exact version doesn't
+                  # hit that import path -- verified locally (no `langchain` reference in its
+                  # deepeval/models/llms/openai_model.py at all). We only ever use GEval with our
+                  # own custom judge (eval/deepeval_model.py), never deepeval's OpenAI/Azure
+                  # wrappers, so this is a packaging bug in deepeval, not a real need of ours.
 pandas            # scripts/gen_complaint_cases.py reads the raw Olist CSVs
 # numpy/pyarrow pinned to a known-good pandas build. (Legacy from the removed torch stack;
 # kept because the newer numpy streamlit pulls unpinned has caused pyarrow conflicts here.)
