@@ -21,14 +21,20 @@ the API can never approve something the harness wouldn't.
 import time
 import uuid
 
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 
 from agents.loop import run_case
 from agents.runner_utils import tokens_split
 from eval import monitor, observability
-from harness import routing
+from harness import audit, routing
 from integrations import notify
+
+# complete() (agents/runner_utils.py) already survives rate limits on its own -- this is for
+# the OTHER kind of failure: a malformed model response, a transient provider hiccup, anything
+# that raises past that. One retry, same case_id, trail cleared first -- a failed attempt's
+# partial trail must not count toward rule 4 (harness/policy.py) or double up in the audit log.
+MAX_RESOLVE_ATTEMPTS = 2
 
 # Create the app. The title/description show up on the auto-generated /docs page.
 app = FastAPI(
@@ -72,7 +78,18 @@ async def resolve(complaint: Complaint) -> dict:
     # cost come from the delta across the call, the label-free quality signals from the trail.
     started = time.perf_counter()
     tokens_before = tokens_split()
-    result = await run_case(case_id, complaint.message, temperature=0.0)
+    last_error: Exception | None = None
+    result = None
+    for attempt in range(MAX_RESOLVE_ATTEMPTS):
+        try:
+            result = await run_case(case_id, complaint.message, temperature=0.0)
+            break
+        except Exception as e:
+            last_error = e
+            if attempt < MAX_RESOLVE_ATTEMPTS - 1:
+                audit.clear(case_id)  # a failed attempt's partial trail must not carry over
+    if result is None:
+        raise HTTPException(status_code=503, detail=f"Could not resolve this complaint: {last_error}")
     latency_s = time.perf_counter() - started
     prompt_tokens, completion_tokens = (a - b for a, b in zip(tokens_split(), tokens_before))
 
