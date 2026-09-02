@@ -7,6 +7,7 @@ python-dotenv
 litellm
 tqdm              # eval sweep progress bar (eval/runner.py)
 langfuse>=2,<3    # OPTIONAL online-eval tracing (eval/observability.py); no-op without keys
+deepeval          # OPTIONAL, only for eval/quality.py's GEval tone metric
 pandas            # scripts/gen_complaint_cases.py reads the raw Olist CSVs
 # numpy/pyarrow pinned to a known-good pandas build. (Legacy from the removed torch stack;
 # kept because the newer numpy streamlit pulls unpinned has caused pyarrow conflicts here.)
