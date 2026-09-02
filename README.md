@@ -112,7 +112,21 @@ The end-to-end sweep is one of several checks; each isolates a failure the headl
 | **trajectory** (in `runner.py`) | looked up the order before refunding; recovered after a refusal | free |
 | **regression gate** (`--baseline`) | McNemar / 2-SE paired check vs a pinned run; zero tolerance on new unauthorized refunds | free |
 
-The **deterministic half** — every policy rule, the harness, the scoring math, and the graders above — is 240 tests gated in CI, no API key. The **stochastic half** (extractor, injection, ablation) needs a provider key and is run on demand.
+The **deterministic half** — every policy rule, the harness, the scoring math, and the graders above — is 244 tests gated in CI, no API key. The **stochastic half** (extractor, injection, ablation) needs a provider key and is run on demand.
+
+### Operations and reply quality
+
+Correctness and safety are necessary, not sufficient — a refund agent also has to be fast, cheap, reliable, and pleasant to talk to. Four newer evals measure that, on 5 real complaints run single-shot through the live agent:
+
+| eval | metric | Gemini 3.5 Flash | Groq (`openai/gpt-oss-120b`) |
+|---|---|---|---|
+| [`reliability.py`](eval/reliability.py) | success rate | — | **100%** (25/25) |
+| [`latency.py`](eval/latency.py) | end-to-end p95 (SLO ≤15s) | 14.47s ✅ | **12.71s** ✅ |
+| [`latency.py`](eval/latency.py) | first-visible-action p95 (SLO ≤6s) | 8.54s ❌ | **7.66s** ❌ |
+| [`cost.py`](eval/cost.py) | $ / request | $0.0127 | free tier (quota-limited) |
+| [`quality.py`](eval/quality.py) | reply tone (DeepEval GEval, 0–1) | 0.913 avg / 200 replies | — |
+
+Switching the default provider to Groq roughly halved median latency and eliminated the ~$765/month cost projection outright, but the first-action tail latency still misses its budget on both providers — traced to task-difficulty variance in a reasoning model, not raw inference speed. The tone eval is the one metric here that grades *how* the agent says something rather than *what* it did: 7 of 200 replies score below threshold, all three worst cases sharing the same adversarial tactic (`pressure`) — the agent holds policy correctly but reads as defensive under sustained pressure. Full numbers, what failed, and what's still open: **[`eval_report.md`](eval_report.md)**.
 
 ---
 
@@ -157,7 +171,7 @@ pip install -r requirements.txt
 cp .env.example .env                        # add one provider key
 
 # The deterministic core — no API key needed:
-pytest -q                       # 240 tests: policy rules, harness, eval math + graders
+pytest -q                       # 244 tests: policy rules, harness, eval math + graders
 python -m harness.policy        # the 7 rules, against the real order DB
 python -m eval.metrics          # the scoring math, checked against hand-worked numbers
 
