@@ -42,7 +42,12 @@ GEMINI_MODEL_FAST = "gemini-3.5-flash"
 # OpenRouter: nvidia/nemotron-3-super-120b-a12b:free. Recommended once credited:
 # meta-llama/llama-3.3-70b-instruct (continuity with the Groq runs) or deepseek/deepseek-chat.
 _PROVIDERS = {
-    "groq": ("groq/llama-3.3-70b-versatile", "GROQ_API_KEY"),
+    # llama-3.3-70b-versatile was retired from Groq's catalog entirely by 2026-09 (confirmed via
+    # a live /v1/models call — Groq's lineup shifted to Qwen and OpenAI's open-weight gpt-oss
+    # models). gpt-oss-120b verified here with a real tool-calling round trip via litellm before
+    # adopting it: resolves tool_calls correctly, ~90ms total_time — meaningfully faster than the
+    # Gemini path this replaced.
+    "groq": ("groq/openai/gpt-oss-120b", "GROQ_API_KEY"),
     "openrouter": ("openrouter/nvidia/nemotron-3-super-120b-a12b:free", "OPENROUTER_API_KEY"),
     # Gemini via litellm's Google AI Studio path (needs an AIza-prefixed key, not an AQ. Vertex
     # one). Pay-as-you-go, no minimum deposit — a full sweep is ~$1-3 of real usage on Flash.
