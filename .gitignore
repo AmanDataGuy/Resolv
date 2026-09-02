@@ -227,22 +227,22 @@ __marimo__/
 data/*
 !data/db/
 
-# Resolv local-only docs — personal study notes, the original planning spec, and
-# the internal fine-tuning write-up. README.md is the public-facing source of
-# truth; these stay local, never pushed.
+# Resolv local-only docs — personal study notes and the original planning spec.
+# README.md and eval_report.md are the public-facing sources of truth; these stay
+# local, never pushed. (OFFLINE_EVAL_NOTES.md, ONLINE_EVAL_NOTES.md, the old
+# EVAL_REPORT.md, CHANGES_REPORT.md, and plan_ahead.md were consolidated into
+# eval_report.md (pushed) and study/eval.md (local) and removed.)
 notes.md
 resolv.md
 finetuning_report.md
-OFFLINE_EVAL_NOTES.md
-ONLINE_EVAL_NOTES.md
-EVAL_REPORT.md
 INTERVIEW_QA.md
-plan_ahead.md
-CHANGES_REPORT.md
 
 # Personal study material — long-form learning notes for this project. Local only,
 # never pushed. The fine-tuning report now lives inside study/ as well.
 study/
+
+# DeepEval's own local cache/test-run scratch files (eval/quality.py) — regenerated every run.
+.deepeval/
 
 # Resolv fine-tune artifacts — LoRA adapters, downloaded model zips, and training
 # run outputs. Large binaries and reproducible outputs, never committed (README
