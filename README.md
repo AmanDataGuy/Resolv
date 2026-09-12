@@ -18,9 +18,11 @@
 
 <div align="center">
 
-![Resolv demo — the harness refusing an inflated refund](docs/demo.png)
+<video src="https://raw.githubusercontent.com/AmanDataGuy/Resolv/main/docs/demo.mp4" controls width="700" poster="https://raw.githubusercontent.com/AmanDataGuy/Resolv/main/docs/demo.png">
+  Your browser doesn't support inline video — <a href="https://raw.githubusercontent.com/AmanDataGuy/Resolv/main/docs/demo.mp4">watch demo.mp4 directly</a>.
+</video>
 
-<sub>An adversarial late-delivery claim ($603.52 paid → demands $900, threatens legal action). The record shows the order arrived <em>early</em>, so the policy engine denies the refund and the agent escalates to a human — it cannot pay out what the harness refuses. Left: the internal trail, streamed live. Right: what the customer receives.</sub>
+<sub>A real order paid $639.43; the customer claims $900, cites a fake internal "approval," and threatens a bank dispute. The harness denies the inflated ask, pays out the correct capped refund ($159.86), and escalates the disputed case to a human — every verdict visible in the live trail as it happens.</sub>
 
 </div>
 
