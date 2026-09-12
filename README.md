@@ -22,7 +22,7 @@
   Your browser doesn't support inline video — <a href="https://raw.githubusercontent.com/AmanDataGuy/Resolv/main/docs/demo.mp4">watch demo.mp4 directly</a>.
 </video>
 
-<sub>A real order paid $639.43; the customer claims $900, cites a fake internal "approval," and threatens a bank dispute. The harness denies the inflated ask, pays out the correct capped refund ($159.86), and escalates the disputed case to a human — every verdict visible in the live trail as it happens.</sub>
+<sub>A real order paid $639.43; the customer claims $900, cites a fake internal "approval," and threatens a bank dispute. The harness denies the inflated ask and pays out the correct capped refund ($159.86) instead — resolved automatically, no human needed, because the right amount was already the right answer. Every verdict visible in the live trail as it happens.</sub>
 
 </div>
 
