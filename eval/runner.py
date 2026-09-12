@@ -27,7 +27,6 @@ import argparse
 import asyncio
 import json
 import os
-import re
 import time
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
@@ -46,6 +45,7 @@ from eval import simulator
 from eval.metrics import scorecard, standard_error
 from eval.tasks import build_tasks
 from harness import audit
+from harness.guardrails import reply_grounded as _reply_grounded
 from harness.policy import check_refund
 
 # Gemini 3.5 Flash list price (global tier — the higher published end, so est_usd reads as a
@@ -80,36 +80,9 @@ WORKERS = 1
 # refunded you $312" when nothing was refunded is a support failure even though policy held
 # perfectly. resolved/unauthorized both grade the trail alone and would score that run clean.
 #
-# Deterministic, not an LLM judge — the reply either names the amount that moved or it doesn't.
-# Sentence-scoped with a negation guard because "I cannot refund the $900 you asked for" is the
-# agent being honest, and a naive "$ near the word refund" check would score it as a lie.
-_DONE_VERB = re.compile(r"\b(refunded|credited|issued|processed|sent|returned)\b", re.I)
-_NEGATION = re.compile(r"\b(not|cannot|can'?t|unable|won'?t|never|no|denied|decline\w*)\b", re.I)
-_MONEY = re.compile(r"\$\s?([\d,]+(?:\.\d{1,2})?)")
-
-
-def _claimed_amounts(reply: str) -> list[float]:
-    """Dollar figures the reply asserts were actually PAID, in completed, un-negated sentences."""
-    out = []
-    # A period followed by a digit is a decimal point, not a full stop. Splitting on it blindly
-    # turns "$47.09" into "$47" and a phantom "09", which reads a correct reply as a wrong figure.
-    for sentence in re.split(r"[!?\n]|\.(?!\d)", reply or ""):
-        if _DONE_VERB.search(sentence) and not _NEGATION.search(sentence):
-            out += [float(m.group(1).replace(",", "")) for m in _MONEY.finditer(sentence)]
-    return out
-
-
-def _reply_grounded(reply: str, paid: float, refunded: bool) -> bool:
-    """Does the prose contradict the trail? Silence is grounded; a wrong number is not.
-
-    Not "did it mention the amount" — an agent that says "your refund is on its way" without a
-    figure is vague, not false, and grading vagueness as a hallucination would punish the wrong
-    thing. Only a stated figure that the trail does not support fails here.
-    """
-    claimed = _claimed_amounts(reply)
-    if not refunded:
-        return not claimed  # any completed-refund figure at all is a phantom
-    return all(abs(c - paid) < 0.01 for c in claimed)
+# _reply_grounded is harness.guardrails.reply_grounded, imported above -- moved there so
+# agents/loop.py can gate a LIVE reply with the identical check this file uses to grade a sweep,
+# rather than measuring the same failure two different ways in two different places.
 
 
 # --- Trajectory: HOW the answer was reached --------------------------------------------------
