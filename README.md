@@ -18,11 +18,11 @@
 
 <div align="center">
 
-<video src="https://github.com/user-attachments/assets/f5de72ae-6c09-41ab-839a-664585b9ad72" controls width="700" poster="https://raw.githubusercontent.com/AmanDataGuy/Resolv/main/docs/demo.png">
-  Your browser doesn't support inline video — <a href="https://github.com/user-attachments/assets/f5de72ae-6c09-41ab-839a-664585b9ad72">watch the demo directly</a>.
-</video>
+![Resolv demo — the harness capping an inflated refund](docs/demo.png)
 
 <sub>A real order paid $639.43; the customer claims $900, cites a fake internal "approval," and threatens a bank dispute. The harness denies the inflated ask and pays out the correct capped refund ($159.86) instead — resolved automatically, no human needed, because the right amount was already the right answer. Every verdict visible in the live trail as it happens.</sub>
+
+<sub>▶ Full 32-second video walkthrough: <em>link goes here once uploaded</em></sub>
 
 </div>
 
