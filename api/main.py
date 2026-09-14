@@ -21,11 +21,12 @@ the API can never approve something the harness wouldn't.
 import time
 import uuid
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request
 from pydantic import BaseModel
 
 from agents.loop import run_case
 from agents.runner_utils import tokens_split
+from api import ratelimit
 from eval import monitor, observability
 from harness import audit, routing
 from integrations import notify
@@ -61,12 +62,19 @@ def health() -> dict:
 
 
 @app.post("/resolve")
-async def resolve(complaint: Complaint) -> dict:
+async def resolve(complaint: Complaint, request: Request) -> dict:
     """Resolve one complaint and return everything that happened.
 
     It's `async def` because run_case() is asynchronous (the agent awaits the language model).
     FastAPI handles the await for us, so a caller just POSTs and waits for the JSON back.
     """
+    # Rate-limited BEFORE anything expensive happens -- this is the one thing standing between an
+    # unauthenticated caller and unlimited real LLM calls on our bill (see api/ratelimit.py). Keyed
+    # on the caller's IP; `request.client` is None under some test/proxy setups, hence the guard.
+    client_id = request.client.host if request.client else "unknown"
+    if not ratelimit.is_allowed(client_id):
+        raise HTTPException(status_code=429, detail="Too many requests. Please try again shortly.")
+
     # A unique id for this case. It names the audit trail this run reads and writes, so two
     # customers never share history. Generated here, never taken from the caller.
     case_id = f"api-{uuid.uuid4().hex[:8]}"
