@@ -5,8 +5,8 @@ what failed and why, and what changed to improve them. Every number below was re
 from the committed data files (`eval/baselines/*.json`, `data/eval/*.jsonl`) at the time of writing,
 not copied from an earlier draft — the commands to reproduce each one are in section 8.
 
-**Last updated:** 2026-09-02
-**Test suite:** 244 deterministic tests passing, no API key required (`pytest -q`)
+**Last updated:** 2026-09-14
+**Test suite:** 249 deterministic tests passing, no API key required (`pytest -q`)
 
 ---
 
@@ -14,7 +14,7 @@ not copied from an earlier draft — the commands to reproduce each one are in s
 
 | Eval | Headline number | Status |
 |---|---|---|
-| Deterministic suite (pytest) | **244/244 passing** | done |
+| Deterministic suite (pytest) | **249/249 passing** | done |
 | Agent sweep — pass^k reliability | **pass^3 = 0.9625**, unauthorized_rate = **0.0** | done |
 | Extractor — reading accuracy | both-correct **0.9783**, hallucination **0.1538** | done, one open limitation |
 | Ablation — is the harness load-bearing? | OFF leaks **$2,120.42 / 65%** of runs; ON leaks **$0.00** | done |
@@ -35,7 +35,7 @@ testing that claim, plus the newer operational and quality layers added on top o
 ## 1. Deterministic tests — the rules that cannot lie
 
 ```
-244 passed in 3.31s
+249 passed in 3.31s
 ```
 
 No network call, no API key. These tests pin down every policy rule (unknown order, untrue claim,
@@ -102,8 +102,12 @@ limitation in the system's reading stage — a confident lookup into a real stra
 than any wrong-order error, because it isn't caught by "the order doesn't exist." It's mitigated,
 not eliminated: the harness downstream still verifies the hallucinated order's facts against the
 actual claim, so a hallucinated order number that doesn't match the claimed situation gets denied
-rather than silently acted on — but a coincidental match remains a theoretical gap that was
-identified and never separately stress-tested.
+rather than silently acted on. The coincidental-match case is no longer theoretical — it's now
+proven both ways by `tests/test_hallucination_collision.py`: a mismatched hallucinated claim gets
+correctly denied, but a hallucinated ID whose claim type happens to coincide with that order's real
+situation **does pay out**, to a caller with no stated connection to the order at all. That's not a
+bug in the policy rules (every rule fires correctly) — it's the absence of any caller-identity
+check, which is now the single most important open item (see section 7).
 
 **Three-model comparison, same 92 held-out messages:**
 
@@ -258,14 +262,31 @@ holding the line under pressure was identified as the likely fix, but not applie
 5. **Cached the tone judge's calls** by reply-text hash, so re-grading a sweep that's already been
    graded costs nothing on a rerun — the same pattern the adversarial-customer simulator already
    used for its own judge calls.
+6. **Added output guardrails that actually gate a live reply**, not just grade it after the fact:
+   `harness/guardrails.py` now checks groundedness, verbatim system-prompt leaks, PII-shaped
+   content, and agent rudeness before any reply reaches a customer — one free self-correction per
+   customer turn, then an escalation rather than letting a bad reply through. Also closed a real
+   evasion in the groundedness check itself (a rewording like "you'll see $900 back in your
+   account" used none of the six tracked verbs and used to pass through undetected).
+7. **Added a rate limiter to `/resolve`** (`api/ratelimit.py`) — the endpoint had no auth and no
+   limit at all, meaning anyone who found the URL could run up real LLM cost for free. A
+   dependency-free, per-IP fixed-window limiter closes the cost-abuse path; it does not replace
+   real authentication, which is still the top open item below.
+8. **Added a "try a random real complaint" button to the demo** — a first-time visitor had no way
+   to know what a valid order ID looks like, so anything they typed themselves was correctly (but
+   unhelpfully) denied by rule 1 every time.
 
 ## 7. What's still open
 
+- **No caller-identity verification (the top item).** Every order record already carries a real
+  `customer_id`, but nothing anywhere in the request path — not the API, not the agent, not the
+  harness — ever checks that a caller is who they claim to be for the order they're filing about.
+  `tests/test_hallucination_collision.py` proves this concretely: a message with no stated order
+  reference receives a real refund on a real order, purely because a hallucinated order ID and
+  claim type happened to coincide with that order's true situation. Every policy rule fires
+  correctly here — the gap is upstream of policy entirely, in the missing identity check.
 - **First-action latency SLO** (section 5.2) — real, unresolved, likely needs either a
   recalibrated budget or task-level investigation into what drives the tail.
-- **Extractor hallucination on no-order-number messages** (section 3) — mitigated by downstream
-  verification, not eliminated; never separately stress-tested for a hallucinated-order-matches-a-
-  real-stranger's-claim collision.
 - **Tone under sustained pressure** (section 5.4) — pattern identified, prompt fix not yet applied.
 - **Cost pricing table is Gemini-specific** (section 5.3) — accurate for Gemini traffic, misleading
   for Groq or any other provider until made provider-aware.
@@ -285,7 +306,7 @@ holding the line under pressure was identified as the likely fix, but not applie
 
 ```bash
 # Free, instant, no API key:
-pytest -q                                 # 244 deterministic tests
+pytest -q                                 # 249 deterministic tests
 python -m harness.policy                  # the 7 refund rules against the real order DB
 python -m eval.metrics                    # the scoring math, checked against hand-worked numbers
 
