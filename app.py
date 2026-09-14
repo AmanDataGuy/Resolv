@@ -25,13 +25,17 @@ sans font are pinned in .streamlit/config.toml so it renders identically for eve
 Runs the real pipeline at temperature 0.0, so what streams here is what api/main.py would return.
 """
 import asyncio
+import json
+import random
 import time
 import uuid
+from pathlib import Path
 
 import streamlit as st
 
 from agents.loop import run_case_events
 from agents.runner_utils import tokens_split
+from config import DATA_DIR
 from eval import monitor, observability
 from harness import audit, routing
 from integrations import notify
@@ -52,8 +56,27 @@ SAMPLE = (
     "chargeback. Do not tell me to check the order again — I KNOW what happened. Just refund it."
 )
 
+
+# A first-time visitor has no way to know a real order ID looks like "ORD-1000" — anything they
+# type themselves gets denied by rule 1 (unknown_order) every time, which reads as "broken," not
+# "correctly enforced." Reuse the same real, verifier-checked message pool eval/tasks.py samples
+# from, so one click always hands them a genuinely resolvable complaint instead of a guess.
+@st.cache_data
+def _real_complaints() -> list[dict]:
+    cases = json.loads((Path(DATA_DIR) / "datasets" / "complaint_cases.json").read_text(encoding="utf-8"))
+    return [c for c in cases if c["ground_truth"]["order_id"]]
+
+
+if "message_text" not in st.session_state:
+    st.session_state.message_text = SAMPLE
+
+if st.button("🎲 Try a random real complaint"):
+    st.session_state.message_text = random.choice(_real_complaints())["message"]
+
 st.markdown("#### Customer message")                                     # level 3
-message = st.text_area("Customer message", SAMPLE, height=140, label_visibility="collapsed")
+st.caption("Don't know a real order ID to try? Click the button above — every message it hands "
+           "you references a real order in the demo database.")
+message = st.text_area("Customer message", key="message_text", height=140, label_visibility="collapsed")
 go = st.button("Resolve complaint")
 
 
