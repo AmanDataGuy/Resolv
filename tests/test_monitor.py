@@ -6,12 +6,13 @@ The Langfuse layer is tested only for the one property that matters here: with n
 silent no-op, never a crash on the request path.
 """
 from eval import monitor, observability
+from harness.validity import get_order
 
 
 def _rec(order_id, tool="issue_refund", ok=True, amount=10.0,
-         claim="late_delivery", rule_id="within_policy"):
+         claim="late_delivery", rule_id="within_policy", caller_id=None):
     return {"tool": tool, "order_id": order_id, "ok": ok, "rule_id": rule_id,
-            "args": {"amount_usd": amount, "claim_type": claim}}
+            "args": {"amount_usd": amount, "claim_type": claim}, "caller_id": caller_id}
 
 
 class TestAction:
@@ -85,11 +86,12 @@ def test_record_appends_a_row_and_returns_it(tmp_path, monkeypatch):
     TELEMETRY is redirected to a tmp file so the test never touches the real log.
     """
     monkeypatch.setattr(monitor, "TELEMETRY", tmp_path / "live.jsonl")
+    owner = get_order("ORD-1000")["customer_id"]
     result = {
         "reply": "Refunded $10.00 on ORD-1000.",
         "steps": 3,
         "trail": [_rec("ORD-1000", tool="lookup_order", rule_id="lookup_hit"),
-                  _rec("ORD-1000", amount=10.0)],
+                  _rec("ORD-1000", amount=10.0, caller_id=owner)],
     }
     row = monitor.record("api-x", "my order is late", result, 12.5, 1000, 500)
 
