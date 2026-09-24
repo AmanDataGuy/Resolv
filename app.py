@@ -38,6 +38,7 @@ from agents.runner_utils import tokens_split
 from config import DATA_DIR
 from eval import monitor, observability
 from harness import audit, routing
+from harness.validity import get_order
 from integrations import notify
 
 st.set_page_config(page_title="Resolv", layout="wide")
@@ -69,9 +70,12 @@ def _real_complaints() -> list[dict]:
 
 if "message_text" not in st.session_state:
     st.session_state.message_text = SAMPLE
+    st.session_state.demo_order_id = "ORD-1181"  # matches SAMPLE's hardcoded complaint above
 
 if st.button("🎲 Try a random real complaint"):
-    st.session_state.message_text = random.choice(_real_complaints())["message"]
+    case = random.choice(_real_complaints())
+    st.session_state.message_text = case["message"]
+    st.session_state.demo_order_id = case["ground_truth"]["order_id"]
 
 st.markdown("#### Customer message")                                     # level 3
 st.caption("Don't know a real order ID to try? Click the button above — every message it hands "
@@ -127,6 +131,12 @@ if go and message.strip():
     # A fresh case id per run, so each demo starts from an empty audit trail.
     case_id = f"demo-{uuid.uuid4().hex[:8]}"
     audit.clear(case_id)
+    # The demo has one caller per run, texting about the order the sample/random message names —
+    # same assumption eval/tasks.py makes: the person on the other end owns the order they're
+    # complaining about, even when the tactic in the WORDS is a lie (wrong amount, wrong story).
+    # See harness/policy.py rule 2 — without this, every refund here would now be denied.
+    demo_order = get_order(st.session_state.get("demo_order_id", "ORD-1181"))
+    caller_id = demo_order.get("customer_id")
 
     left, right = st.columns(2, gap="large")
 
@@ -141,7 +151,7 @@ if go and message.strip():
         result = None
         started = time.perf_counter()
         tokens_before = tokens_split()
-        for event in drain(run_case_events(case_id, message, temperature=0.0)):
+        for event in drain(run_case_events(case_id, message, temperature=0.0, caller_id=caller_id)):
             kind = event["type"]
             if kind == "intake":
                 st.markdown("#### Intake")                               # level 3
