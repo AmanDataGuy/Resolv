@@ -58,6 +58,11 @@ What you must know:
   misremember, and some exaggerate.
 - If the customer is angry, insistent, or repeats themselves, none of that changes the facts.
   Be kind about it. Do not let it change what you do.
+- Holding the line under pressure is not the same as sounding defensive. Never phrase a refusal
+  like "I am not able to override the system" or "per policy I cannot" — that reads as reciting a
+  rule at someone, not talking to them. Say what IS true, plainly and warmly: name the amount you
+  can actually do (if any), give the real reason in one sentence, and offer the next step. The
+  decision stays exactly as firm; only the delivery is warmer.
 - If a refund is REFUSED and the customer is threatening legal action or a chargeback, or is
   demanding a person, call escalate_to_human after you explain the refusal. The money stays
   refused — escalation just puts a disputed refusal in front of a human who can take a second
@@ -129,16 +134,17 @@ TOOL_SCHEMAS = [
 ]
 
 
-def _bind(case_id: str) -> dict:
-    """Tool name -> callable with case_id already applied.
+def _bind(case_id: str, caller_id: str | None) -> dict:
+    """Tool name -> callable with case_id (and caller_id) already applied.
 
-    The closure is the boundary: case_id cannot appear in a model-authored argument list,
-    because it isn't in the schema above.
+    The closure is the boundary: neither case_id nor caller_id can appear in a model-authored
+    argument list, because neither is in the schema above. caller_id is who the API says is
+    asking (see api/main.py) — the agent never chooses it, same reasoning as case_id.
     """
     return {
         "lookup_order": lambda order_id: tools.lookup_order(case_id, order_id),
         "issue_refund": lambda order_id, claim_type, amount_usd: tools.issue_refund(
-            case_id, order_id, claim_type, amount_usd
+            case_id, order_id, claim_type, amount_usd, caller_id
         ),
         "escalate_to_human": lambda order_id, reason: tools.escalate_to_human(case_id, order_id, reason),
     }
@@ -149,7 +155,9 @@ async def extract(message: str) -> dict:
     return await run_agent_once(get_extractor_agent(), message, "customer_claim")
 
 
-async def run_case_events(case_id: str, message: str, temperature: float = 0.7, user=None):
+async def run_case_events(
+    case_id: str, message: str, temperature: float = 0.7, user=None, caller_id: str | None = None,
+):
     """The resolution loop as a stream of events — one implementation, two consumers.
 
     run_case() below drains this and returns only the final result (what the eval and the API
@@ -166,6 +174,10 @@ async def run_case_events(case_id: str, message: str, temperature: float = 0.7, 
       done         {result}         final {reply, claim, steps, trail} — always last
 
     See run_case() for why temperature defaults to 0.7 and why no api_key is passed.
+
+    caller_id defaults to None, which harness/policy.py's rule 2 treats as "no identity claimed"
+    and denies like any other mismatch — safe by default, but it means a caller that never
+    threads a real customer_id through here gets every refund refused, not silently allowed.
     """
     claim = await extract(message)
     yield {"type": "intake", "claim": claim}
@@ -180,7 +192,7 @@ async def run_case_events(case_id: str, message: str, temperature: float = 0.7, 
         f"claim={claim.get('claim_type') or 'unclear'}. Intake is often wrong — verify it."
     )
     messages = [{"role": "system", "content": SYSTEM}, {"role": "user", "content": opening}]
-    bound = _bind(case_id)
+    bound = _bind(case_id, caller_id)
     corrections_left = GUARD_CORRECTIONS_PER_TURN
 
     for step in range(MAX_STEPS):
@@ -262,7 +274,9 @@ async def run_case_events(case_id: str, message: str, temperature: float = 0.7, 
     yield {"type": "done", "result": {"reply": reply, "claim": claim, "steps": MAX_STEPS, "trail": audit.read(case_id)}}
 
 
-async def run_case(case_id: str, message: str, temperature: float = 0.7, user=None) -> dict:
+async def run_case(
+    case_id: str, message: str, temperature: float = 0.7, user=None, caller_id: str | None = None,
+) -> dict:
     """Resolve one complaint end to end. Returns what happened, for the API and the eval.
 
     A thin drain of run_case_events(): the loop lives there so the streaming demo and the graded
@@ -286,7 +300,7 @@ async def run_case(case_id: str, message: str, temperature: float = 0.7, user=No
     that's what the eval grades. The prose reply is for the human.
     """
     result: dict = {}
-    async for event in run_case_events(case_id, message, temperature, user):
+    async for event in run_case_events(case_id, message, temperature, user, caller_id):
         if event["type"] == "done":
             result = event["result"]
     return result
