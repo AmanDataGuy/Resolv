@@ -36,11 +36,20 @@ so the resolution cost that produced those replies is sunk already -- only the j
 import argparse
 import hashlib
 import json
+import sys
 from pathlib import Path
 
 from deepeval.metrics import GEval
 from deepeval.metrics.g_eval import Rubric
 from deepeval.test_case import LLMTestCase, LLMTestCaseParams
+
+# The judge's own `reason` text is free-form model output and can contain characters (e.g. a
+# non-breaking hyphen, U+2011) that a Windows console's default cp1252 encoding can't print --
+# not a logic bug, but a real crash the first time someone runs this on Windows and the judge
+# happens to phrase a reason with one. Reconfigure rather than route every print through a
+# manual encode/replace: this is stdout's own bytes-out step, and this script owns that stream.
+if hasattr(sys.stdout, "reconfigure"):
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 
 from eval.deepeval_model import ResolvJudge
 
@@ -76,8 +85,13 @@ def main() -> None:
     path = OUT_DIR / args.infile
     rows = [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines() if line.strip()]
 
+    # tactic travels alongside each test case (not through LLMTestCase, which has no field for
+    # it) so the report below can break down tone by adversarial tactic -- eval_report.md found
+    # the tone failures weren't noise, they were concentrated entirely in one tactic (pressure),
+    # and an averaged number hides exactly that kind of concentration.
     test_cases = [
-        LLMTestCase(input=r.get("task_id") or r.get("case_id") or "", actual_output=r["reply"])
+        (LLMTestCase(input=r.get("task_id") or r.get("case_id") or "", actual_output=r["reply"]),
+         r.get("tactic"))
         for r in rows
         if r.get("reply")
     ]
@@ -90,7 +104,7 @@ def main() -> None:
     # scores. (ponytail: good enough for a rubric that changes rarely; a rubric-hash key is the
     # upgrade if that stops being true.)
     graded = []
-    for tc in test_cases:
+    for tc, tactic in test_cases:
         key = hashlib.sha256(tc.actual_output.encode()).hexdigest()[:16]
         cache_path = CACHE / f"{key}.json"
         if cache_path.exists():
@@ -100,7 +114,7 @@ def main() -> None:
             cached = {"score": round(tone.score, 3), "reason": tone.reason}
             CACHE.mkdir(parents=True, exist_ok=True)
             cache_path.write_text(json.dumps(cached), encoding="utf-8")
-        graded.append({"case_id": tc.input, **cached})
+        graded.append({"case_id": tc.input, "tactic": tactic, **cached})
 
     n = len(graded)
     avg = sum(g["score"] for g in graded) / n if n else 0.0
@@ -111,6 +125,23 @@ def main() -> None:
     print("=" * 60)
     print(f"avg tone (0-1)         : {round(avg, 3)}")
     print(f"below threshold ({THRESHOLD}) : {len(below)} / {n}")
+
+    # By tactic, not just averaged -- a tone problem concentrated in one adversarial tactic reads
+    # as fine on the overall average and only shows up here. This is what would have caught the
+    # pressure-tactic regression from eval_report.md before it needed a manual worst-3 read.
+    tactics = sorted({g["tactic"] for g in graded if g["tactic"]})
+    if tactics:
+        stats = {
+            tac: {"n": len(rs), "avg": sum(g["score"] for g in rs) / len(rs),
+                  "below": sum(1 for g in rs if g["score"] < THRESHOLD)}
+            for tac, rs in ((t, [g for g in graded if g["tactic"] == t]) for t in tactics)
+        }
+        lowest = min(stats, key=lambda t: stats[t]["avg"]) if len(stats) > 1 else None
+        print("by tactic:")
+        for tac, s in stats.items():
+            flag = "  <-- lowest" if tac == lowest else ""
+            print(f"  {tac:<16} n={s['n']:<4} avg={round(s['avg'], 3)}  below={s['below']}{flag}")
+
     if worst:
         print("worst 3:")
         for w in worst:
