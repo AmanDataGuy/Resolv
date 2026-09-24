@@ -45,6 +45,9 @@ claim_type: what the customer is complaining about — exactly one of:
   late_delivery     — it arrived (or they believe it arrived) later than promised
   never_arrived     — it shipped but never showed up; they're still waiting
   order_canceled    — their order was canceled
+  - If the message describes NO problem yet ("hi", "quick question", a greeting with nothing
+    else), set claim_type to null. NEVER force it into one of the three types just to fill the
+    field — that produces a confident guess about a complaint that was never made.
 
 Do not judge whether the claim is true — only extract what the customer is asserting. The
 verification happens elsewhere.
