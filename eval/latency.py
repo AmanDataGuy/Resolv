@@ -34,10 +34,10 @@ SLO_P95_S = 15.0                # full resolution, tail budget
 SLO_FIRST_ACTION_P95_S = 6.0    # perceived: time to the first visible thing happening
 
 
-async def _timed_run(case_id: str, message: str) -> dict:
+async def _timed_run(case_id: str, message: str, caller_id: str | None) -> dict:
     t0 = time.perf_counter()
     first_action_s = None
-    async for event in run_case_events(case_id, message, temperature=0.7):
+    async for event in run_case_events(case_id, message, temperature=0.7, caller_id=caller_id):
         if event["type"] in ("tool_call", "reply") and first_action_s is None:
             first_action_s = time.perf_counter() - t0
     return {"total": time.perf_counter() - t0, "first_action": first_action_s}
@@ -47,7 +47,7 @@ def measure_one(task: dict, repeat: int) -> dict:
     case_id = f"lat-{task['task_id']}-r{repeat}"
     audit.clear(case_id)
     audit.clear_order(task["order_id"])
-    return asyncio.run(_timed_run(case_id, task["message"]))
+    return asyncio.run(_timed_run(case_id, task["message"], task["customer_id"]))
 
 
 def benchmark() -> list[dict]:
