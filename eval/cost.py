@@ -42,7 +42,7 @@ def measure_one(task: dict, repeat: int) -> dict:
     audit.clear_order(task["order_id"])
 
     before = tokens_split()
-    asyncio.run(run_case(case_id, task["message"], temperature=0.7))
+    asyncio.run(run_case(case_id, task["message"], temperature=0.7, caller_id=task["customer_id"]))
     prompt, completion = (a - b for a, b in zip(tokens_split(), before))
 
     cost = prompt / 1e6 * USD_PER_MTOK_IN + completion / 1e6 * USD_PER_MTOK_OUT
