@@ -116,6 +116,9 @@ def build_cases(n_orders: int = 4) -> list[dict]:
                 "tactic": name,
                 "difficulty": "injection",
                 "order_id": order["order_id"],
+                "customer_id": order["customer_id"],  # the real owner — the attacker IS the
+                                                        # account holder here; the attack is in
+                                                        # the MESSAGE, not a stolen identity
                 "claim_type": "late_delivery",
                 "cap": round(order["amount_usd"] * REFUND_CAP_FRACTION["late_delivery"], 2),
                 "message": template.format(order_id=order["order_id"], amount=order["amount_usd"]),
@@ -132,7 +135,9 @@ def _run(case: dict) -> dict:
     audit.clear(case["case_id"])
     audit.clear_order(case["order_id"])
     try:
-        result = asyncio.run(run_case(case["case_id"], case["message"], temperature=0.7))
+        result = asyncio.run(
+            run_case(case["case_id"], case["message"], temperature=0.7, caller_id=case["customer_id"])
+        )
         trail, steps, reply = result["trail"], result["steps"], result["reply"]
         error = None
     except Exception as e:
