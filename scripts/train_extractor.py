@@ -107,12 +107,30 @@ def extraction_reward(completions, order_id_gt, claim_type_gt, **kwargs) -> list
     return rewards
 
 
+def _mcnemar(b: int, c: int) -> tuple[float, bool]:
+    """Duplicated from eval/metrics.py::mcnemar() on purpose — this script has to run standalone
+    in a Kaggle notebook where the repo isn't installed (same reasoning eval/extractor.py gives
+    for duplicating the split constants). b = base-right/tuned-wrong, c = the reverse."""
+    if b + c == 0:
+        return (0.0, False)
+    chi2 = (abs(b - c) - 1) ** 2 / (b + c)
+    return (chi2, chi2 > 3.841)  # 1 df, alpha=0.05
+
+
 def measure(model, tok, rows: list[dict]) -> dict:
     """Extraction accuracy on held-out rows — order id, claim type, and both-right. Greedy decode,
     the same parse the reward uses. This is THE number: run it on the base model and again on the
-    tuned one, on messages neither was trained on, and the delta is what RLVR bought."""
+    tuned one, on messages neither was trained on, and the delta is what RLVR bought.
+
+    Returns per-case `both_ok` alongside the aggregate, not just the aggregate. A prior fine-tune
+    on this project logged only aggregates and the resulting "+0.016" claim needed a McNemar test
+    it could never get, because b and c (which specific cases flipped) were unrecoverable — see
+    eval/runner.py's docstring for the full story. Returning rows here is what lets main() compute
+    a real paired test the same run, rather than repeating that mistake in a second script.
+    """
     model.eval()
     order_ok = type_ok = both_ok = 0
+    per_case = []
     for r in rows:
         enc = tok(r["prompt"], return_tensors="pt").to(model.device)
         out = model.generate(**enc, max_new_tokens=40, do_sample=False, pad_token_id=tok.eos_token_id)
@@ -122,8 +140,9 @@ def measure(model, tok, rows: list[dict]) -> dict:
         order_ok += o
         type_ok += t
         both_ok += o and t
+        per_case.append(o and t)
     n = len(rows)
-    return {"order": order_ok / n, "type": type_ok / n, "both": both_ok / n, "n": n}
+    return {"order": order_ok / n, "type": type_ok / n, "both": both_ok / n, "n": n, "per_case": per_case}
 
 
 def main() -> None:
@@ -171,6 +190,28 @@ def main() -> None:
     tuned = measure(trainer.model, tok, test_rows)
     print(f"TUNED  order={tuned['order']:.3f}  type={tuned['type']:.3f}  both={tuned['both']:.3f}")
     print(f"Δ both-right = {tuned['both'] - base['both']:+.3f}   (n={base['n']} held-out messages)")
+
+    # Paired, not just a delta: b = base got it right and tuned lost it, c = the reverse. Both
+    # loops ran over test_rows IN THE SAME ORDER, so per_case[i] in each list refers to the same
+    # held-out message — that pairing is what makes McNemar valid here rather than two unrelated
+    # accuracy numbers.
+    b = sum(1 for was, now in zip(base["per_case"], tuned["per_case"]) if was and not now)
+    c = sum(1 for was, now in zip(base["per_case"], tuned["per_case"]) if not was and now)
+    chi2, significant = _mcnemar(b, c)
+    print(f"McNemar: b(regressed)={b}  c(improved)={c}  chi2={chi2:.3f}  significant@0.05={significant}")
+
+    # Save per-case rows for BOTH runs — not just the printed aggregate. If this run's numbers
+    # ever need re-checking later (a different rubric, a disputed claim), the rows make that
+    # possible without a second GPU run; the aggregate alone would not.
+    compare_path = Path("data/eval/extractor_finetune_compare.jsonl")
+    compare_path.parent.mkdir(parents=True, exist_ok=True)
+    with open(compare_path, "w") as f:
+        for i, r in enumerate(test_rows):
+            f.write(json.dumps({
+                "order_id_gt": r["order_id_gt"], "claim_type_gt": r["claim_type_gt"],
+                "base_both_ok": base["per_case"][i], "tuned_both_ok": tuned["per_case"][i],
+            }) + "\n")
+    print(f"per-case base/tuned rows -> {compare_path}")
     print(f"extractor adapter saved to {OUT}")
 
 
