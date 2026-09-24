@@ -12,6 +12,7 @@ picking live records means the suite fails loudly if the DB is ever regenerated 
 
 No API key, no network. That is the point of keeping enforcement out of the model.
 """
+import json
 from datetime import date
 
 import pytest
@@ -124,6 +125,19 @@ class TestValidity:
         finding = verify_claim(CustomerClaim(order_id=None, claim_type="late_delivery"))
         assert finding.claim_true is None and finding.order_found is False
 
+    def test_missing_claim_type_does_not_crash_and_is_none_not_false(self):
+        """Found by an end-to-end stress test: a message with no stated problem ("hi", "quick
+        question") used to force claim_type into a required field, which a strict provider schema
+        (Groq) rejected outright when the model tried to answer null honestly -- crashing the
+        WHOLE resolution before the agent loop even started. claim_type is optional on
+        CustomerClaim now, same reasoning as order_id, and this must not crash on the
+        `.replace('_', ' ')` call that assumed a string."""
+        order = _pick("late")
+        finding = verify_claim(CustomerClaim(order_id=order["order_id"], claim_type=None))
+        assert finding.order_found is True
+        assert finding.claim_true is None
+        assert finding.amount_usd == order["amount_usd"]
+
     def test_finding_carries_the_real_amount(self):
         """The harness supplies the number; the model is never asked for it."""
         order = _pick("late")
@@ -187,6 +201,62 @@ class TestAuditTrail:
         assert audit.read(other) == []
         audit.clear(other)
 
+    def test_first_record_chains_to_genesis(self, case):
+        audit.append(case, "lookup_order", "ORD-1000", {}, _allow(), True, "ok")
+        assert audit.read(case)[0]["prev_hash"] == audit.GENESIS_HASH
+
+    def test_each_record_chains_to_the_one_before_it(self, case):
+        audit.append(case, "lookup_order", "ORD-1000", {}, _allow(), True, "a")
+        audit.append(case, "lookup_order", "ORD-1000", {}, _allow(), True, "b")
+        trail = audit.read(case)
+        assert trail[1]["prev_hash"] == audit._hash(trail[0])
+
+    def test_record_ids_are_unique(self, case):
+        audit.append(case, "lookup_order", "ORD-1000", {}, _allow(), True, "a")
+        audit.append(case, "lookup_order", "ORD-1000", {}, _allow(), True, "b")
+        trail = audit.read(case)
+        assert trail[0]["record_id"] != trail[1]["record_id"]
+
+    def test_verify_chain_passes_on_an_untouched_trail(self, case):
+        audit.append(case, "lookup_order", "ORD-1000", {}, _allow(), True, "a")
+        audit.append(case, "issue_refund", "ORD-1000", {"amount_usd": 5.0}, _allow(), True, "b")
+        assert audit.verify_chain(case) == (True, None)
+
+    def test_verify_chain_passes_on_an_empty_or_single_record_trail(self, case):
+        assert audit.verify_chain(case) == (True, None), "no records is a vacuously intact chain"
+        audit.append(case, "lookup_order", "ORD-1000", {}, _allow(), True, "a")
+        assert audit.verify_chain(case) == (True, None)
+
+    def test_verify_chain_catches_an_edited_record(self, case):
+        """The actual attack this exists to catch: flip a real record's `ok` after the fact."""
+        audit.append(case, "issue_refund", "ORD-1000", {"amount_usd": 900.0}, _allow(), True, "a")
+        audit.append(case, "lookup_order", "ORD-1000", {}, _allow(), True, "b")
+        p = audit._path(case)
+        lines = p.read_text().splitlines()
+        tampered = json.loads(lines[0])
+        tampered["ok"] = False
+        lines[0] = json.dumps(tampered)
+        p.write_text("\n".join(lines) + "\n")
+        ok, break_at = audit.verify_chain(case)
+        assert ok is False and break_at == 1, "record 0's own prev_hash is untouched; record 1 is where it shows"
+
+    def test_verify_chain_catches_tampering_with_the_last_record(self, case):
+        """Editing the LAST record changes nothing downstream to compare against — this is the
+        case verify_chain's per-file scope genuinely cannot catch on its own, and it matters that
+        the test says so rather than silently not covering it. A single-record chain has the same
+        gap: there's nothing after record 0 to notice its prev_hash is still consistent with a
+        forged genesis. This is exactly the "per case file, not one global ledger" limit the
+        module docstring names — recorded here as a known boundary, not a bug."""
+        audit.append(case, "issue_refund", "ORD-1000", {"amount_usd": 900.0}, _allow(), True, "a")
+        p = audit._path(case)
+        lines = p.read_text().splitlines()
+        tampered = json.loads(lines[0])
+        tampered["ok"] = False  # tampered, but it's the only (and therefore last) record
+        lines[0] = json.dumps(tampered)
+        p.write_text("\n".join(lines) + "\n")
+        ok, _ = audit.verify_chain(case)
+        assert ok is True, "documents the known gap: no later record exists to expose this edit"
+
 
 class TestTools:
     """tools.py is the only write path, and every mutation goes through policy first."""
@@ -209,7 +279,7 @@ class TestTools:
     def test_over_cap_refund_is_refused_as_a_result_not_an_exception(self, case):
         """A refusal the model can read and explain, not a crash that strands the customer."""
         order = _pick("late", in_window=True)
-        out = issue_refund(case, order["order_id"], "late_delivery", order["amount_usd"])
+        out = issue_refund(case, order["order_id"], "late_delivery", order["amount_usd"], order["customer_id"])
         assert out.startswith("Refused:")
         assert audit.read(case)[-1]["rule_id"] == "refund_exceeds_cap"
         assert audit.read(case)[-1]["ok"] is False
@@ -218,22 +288,32 @@ class TestTools:
         order = _pick("late", in_window=True)
         cap = round(order["amount_usd"] * REFUND_CAP_FRACTION["late_delivery"], 2)
         amount = min(cap, AUTO_APPROVE_MAX_USD)
-        assert issue_refund(case, order["order_id"], "late_delivery", amount).startswith("Refunded")
+        assert issue_refund(case, order["order_id"], "late_delivery", amount, order["customer_id"]).startswith("Refunded")
 
     def test_second_refund_is_denied_off_the_trail_alone(self, case):
         """Nothing about the second request is wrong on its face — only the past makes it wrong."""
         order = _pick("late", in_window=True)
         cap = round(order["amount_usd"] * REFUND_CAP_FRACTION["late_delivery"], 2)
         amount = min(cap, AUTO_APPROVE_MAX_USD)
-        issue_refund(case, order["order_id"], "late_delivery", amount)
-        again = issue_refund(case, order["order_id"], "late_delivery", amount)
+        owner = order["customer_id"]
+        issue_refund(case, order["order_id"], "late_delivery", amount, owner)
+        again = issue_refund(case, order["order_id"], "late_delivery", amount, owner)
         assert "already refunded" in again.lower()
 
     def test_non_positive_refund_is_refused(self, case):
         """Rule 0. A negative refund is a charge to the customer wearing a refund's name."""
         order = _pick("late", in_window=True)
-        assert issue_refund(case, order["order_id"], "late_delivery", -5.0).startswith("Refused")
+        assert issue_refund(case, order["order_id"], "late_delivery", -5.0, order["customer_id"]).startswith("Refused")
         assert audit.read(case)[-1]["rule_id"] == "invalid_amount"
+
+    def test_caller_who_does_not_own_the_order_is_refused(self, case):
+        """Rule 2. A true claim on a real order is still refused if the caller has no stated
+        connection to it — the fix for tests/test_hallucination_collision.py's residual risk."""
+        order = _pick("late", in_window=True)
+        cap = round(order["amount_usd"] * REFUND_CAP_FRACTION["late_delivery"], 2)
+        out = issue_refund(case, order["order_id"], "late_delivery", cap, "not_the_owner")
+        assert out.startswith("Refused:")
+        assert audit.read(case)[-1]["rule_id"] == "caller_not_order_owner"
 
     def test_escalation_is_never_denied(self, case):
         """Gating the escape hatch is how an agent ends up with nowhere to go and improvises."""
@@ -242,10 +322,32 @@ class TestTools:
         assert out.startswith("Escalated")
         assert audit.read(case)[-1]["rule_id"] == "escalation_always_permitted"
 
+    def test_over_limit_refund_auto_escalates_without_a_separate_tool_call(self, case):
+        """The fix for 2/3 of eval_report.md's imperfect runs: policy correctly says escalate,
+        and the trail must show it reached a human whether or not a second, separate
+        escalate_to_human call ever happens — issue_refund itself now guarantees that."""
+        big = _pick("never_arrived", in_window=True, over_limit=True)
+        out = issue_refund(case, big["order_id"], "never_arrived", AUTO_APPROVE_MAX_USD + 0.01, big["customer_id"])
+        assert "sent to a human" in out.lower()
+        trail = audit.read(case)
+        assert trail[-1]["tool"] == "escalate_to_human"
+        assert trail[-1]["rule_id"] == "escalation_always_permitted"
+        assert trail[-2]["rule_id"] == "over_auto_approve_limit"
+
+    def test_auto_escalation_is_not_duplicated_if_already_escalated(self, case):
+        """A model that DOES call escalate_to_human itself right after must not produce two
+        records for the same order — the guard checks history, not just the current attempt."""
+        big = _pick("never_arrived", in_window=True, over_limit=True)
+        amount = AUTO_APPROVE_MAX_USD + 0.01
+        issue_refund(case, big["order_id"], "never_arrived", amount, big["customer_id"])
+        issue_refund(case, big["order_id"], "never_arrived", amount, big["customer_id"])
+        escalations = [r for r in audit.read(case) if r["tool"] == "escalate_to_human"]
+        assert len(escalations) == 1
+
     def test_refused_refund_moves_no_money(self, case):
         """The enforcement claim: a denial must leave no successful refund in the trail."""
         order = _pick("late", in_window=True)
-        issue_refund(case, order["order_id"], "late_delivery", order["amount_usd"])
+        issue_refund(case, order["order_id"], "late_delivery", order["amount_usd"], order["customer_id"])
         assert not [r for r in audit.read(case) if r["tool"] == "issue_refund" and r["ok"]]
 
 
