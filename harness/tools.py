@@ -78,7 +78,7 @@ def lookup_order(case_id: str, order_id: str) -> str:
     return result
 
 
-def issue_refund(case_id: str, order_id: str, claim_type: str, amount_usd: float) -> str:
+def issue_refund(case_id: str, order_id: str, claim_type: str, amount_usd: float, caller_id: str | None) -> str:
     """Refund money. Every rule in policy.py stands between this call and the mutation.
 
     Check, then record, then act — and the record is written for denials and escalations too.
@@ -86,14 +86,18 @@ def issue_refund(case_id: str, order_id: str, claim_type: str, amount_usd: float
 
     HISTORY IS THE UNION OF TWO SCOPES. audit.read(case_id) is what happened in THIS conversation;
     audit.order_history(order_id) is every successful refund this order has EVER received, in any
-    conversation. Rule 4 needs both — a customer who contacts support twice, in two separate,
+    conversation. Rule 5 needs both — a customer who contacts support twice, in two separate,
     honest cases, must not be paid twice. The whole read-check-append sequence runs under a lock:
     without it, concurrent calls on the same case can all read the history before any of them
-    appends, and more than one clears rule 4 (see _refund_lock above).
+    appends, and more than one clears rule 5 (see _refund_lock above).
+
+    caller_id has no default here on purpose — every call site (agents/loop.py's closure, this
+    file's own demo()) must say explicitly who is asking, even if the answer is None. See
+    harness/policy.py rule 2 for what None means: not "skip the check," but "no identity claimed."
     """
     with _refund_lock:
         history = audit.read(case_id) + audit.order_history(order_id)
-        decision = check_refund(order_id, claim_type, amount_usd, history)
+        decision = check_refund(order_id, claim_type, amount_usd, history, caller_id)
 
         ok = decision.action == "allow"
         if ok:
@@ -106,8 +110,22 @@ def issue_refund(case_id: str, order_id: str, claim_type: str, amount_usd: float
         audit.append(
             case_id, "issue_refund", order_id,
             {"amount_usd": amount_usd, "claim_type": claim_type},
-            decision, ok, result,
+            decision, ok, result, caller_id,
         )
+
+        # An escalate verdict must reach a human whether or not the model remembers to say so
+        # itself. Nothing in policy.py's rule 7 (over_auto_approve_limit) instructs the MODEL to
+        # follow up with escalate_to_human -- and 2 of 3 imperfect eval runs (eval_report.md §2)
+        # were exactly this: policy correctly said escalate, the agent never made the separate
+        # call. routing.py already treats a policy-level escalate the same as an explicit one;
+        # this makes that guarantee structural instead of relying on model compliance for it, the
+        # same reasoning MAX_STEPS exhaustion and repeated guardrail failures already use in
+        # agents/loop.py. Guarded so a model that DOES call escalate_to_human itself right after
+        # doesn't produce two records for the same order.
+        if decision.action == "escalate" and not any(
+            r["tool"] == "escalate_to_human" and r["order_id"] == order_id for r in history
+        ):
+            escalate_to_human(case_id, order_id, decision.reason)
     return result
 
 
@@ -151,6 +169,7 @@ def demo() -> None:
         if o["situation"] == "late" and (NOW - date.fromisoformat(o["promised_date"])).days <= CLAIM_WINDOW_DAYS
     )
     oid = fresh["order_id"]
+    owner = fresh["customer_id"]
     # This demo issues a real refund on a real order below (line ~170) — the order index (which
     # rule 4 now reads across cases, 2026-08-15 fix) must be reset before AND after, or this demo
     # leaks a permanent "already refunded" record into a real order's history, and running it
@@ -164,28 +183,33 @@ def demo() -> None:
     assert "not found" in lookup_order(case, "ORD-999999")
     assert audit.read(case)[-1]["rule_id"] == "lookup_miss"
 
-    # An over-cap refund is refused, and the refusal is a STRING the model can act on.
-    out = issue_refund(case, oid, "late_delivery", fresh["amount_usd"])
+    # A caller with no stated connection to the order is refused before the cap is even checked.
+    assert issue_refund(case, oid, "late_delivery", 1.0, "someone_else").startswith("Refused:")
+    assert audit.read(case)[-1]["rule_id"] == "caller_not_order_owner"
+
+    # An over-cap refund from the real owner is refused, and the refusal is a STRING the model
+    # can act on.
+    out = issue_refund(case, oid, "late_delivery", fresh["amount_usd"], owner)
     assert out.startswith("Refused:"), out
     assert audit.read(case)[-1]["rule_id"] == "refund_exceeds_cap"
     assert audit.read(case)[-1]["ok"] is False  # the attempt is recorded even though it failed
 
-    # A within-cap refund succeeds...
+    # A within-cap refund from the real owner succeeds...
     cap = round(fresh["amount_usd"] * REFUND_CAP_FRACTION["late_delivery"], 2)
     amount = min(cap, AUTO_APPROVE_MAX_USD)
-    assert issue_refund(case, oid, "late_delivery", amount).startswith("Refunded")
+    assert issue_refund(case, oid, "late_delivery", amount, owner).startswith("Refunded")
 
     # ...and the SAME call a second time is denied off the trail alone. Nothing about the
-    # request changed — only the past did. This is rule 4 reading what tools.py wrote.
-    assert "already refunded" in issue_refund(case, oid, "late_delivery", amount).lower()
+    # request changed — only the past did. This is rule 5 reading what tools.py wrote.
+    assert "already refunded" in issue_refund(case, oid, "late_delivery", amount, owner).lower()
 
     # Escalation is never denied.
     assert escalate_to_human(case, oid, "customer asked for a manager").startswith("Escalated")
 
-    # 2 lookups + 3 refund attempts + 1 escalation. Every call the agent could make, recorded —
-    # including the two that were refused, which are the ones worth reading.
+    # 2 lookups + 4 refund attempts + 1 escalation. Every call the agent could make, recorded —
+    # including the three that were refused, which are the ones worth reading.
     trail = audit.read(case)
-    assert len(trail) == 6, f"expected 6 recorded attempts, got {len(trail)}"
+    assert len(trail) == 7, f"expected 7 recorded attempts, got {len(trail)}"
     audit.clear(case)
     audit.clear_order(oid)
     print(f"tools demo OK — {len(TOOLS)} tools, every mutation policy-checked, {len(trail)} attempts recorded")
