@@ -34,12 +34,18 @@ class CustomerClaim(BaseModel):
 
     order_id is optional on purpose: if the customer never gives one, the correct
     answer is None ("unknown"), not a hallucinated order.
+    claim_type is optional for the same reason: a first message like "hi" or "quick
+    question" describes no problem yet, and the correct answer is None ("unclear"),
+    not a forced guess at one of the three types. Found the hard way — a strict
+    Groq structured-output schema REJECTS a model's honest `null` here if the field
+    isn't declared optional, and the whole extraction (and therefore the whole
+    resolution) crashes on a message that simply hadn't gotten to the complaint yet.
     stated_amount_usd is captured only to cross-check against the record — it is
     never trusted as fact.
     """
 
     order_id: str | None = None
-    claim_type: ClaimType
+    claim_type: ClaimType | None = None
     stated_amount_usd: float | None = None
 
 
