@@ -73,6 +73,21 @@ def verify_claim(claim: CustomerClaim) -> ClaimFinding:
             reason=f"Order {claim.order_id} is not in our records — ask the customer to re-check the number.",
         )
 
+    if not claim.claim_type:
+        # Order found, but no problem stated yet -- "can't judge" is still the honest answer,
+        # not a guess. No real caller hits this today: check_refund() only ever calls this with
+        # a claim_type the model supplied via the issue_refund tool call, which is a required,
+        # enum-constrained argument and can't be None. It's guarded anyway because claim_type
+        # became optional on CustomerClaim (schemas.py) so the EXTRACTOR's own raw output
+        # doesn't crash a strict provider schema on a message that hasn't stated a complaint yet.
+        return ClaimFinding(
+            order_found=True,
+            claim_true=None,
+            order_id=claim.order_id,
+            amount_usd=order.get("amount_usd"),
+            reason="Order found, but no problem was stated — ask the customer what went wrong.",
+        )
+
     holds = _claim_holds(claim.claim_type, order)
     if holds:
         reason = f"Confirmed against the record: {claim.claim_type.replace('_', ' ')} is accurate."
