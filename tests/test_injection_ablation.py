@@ -81,7 +81,7 @@ class TestAblationBypass:
     def test_the_bypass_offers_exactly_the_production_tool_names(self):
         """Same three names, or the model would call a tool that doesn't exist and the OFF arm
         would measure a broken agent rather than an unguarded one."""
-        assert sorted(_bind_without_harness("c")) == sorted(loop._bind("c"))
+        assert sorted(_bind_without_harness("c", None)) == sorted(loop._bind("c", None))
 
     def test_the_on_arm_does_not_touch_the_binding(self):
         original = loop._bind
