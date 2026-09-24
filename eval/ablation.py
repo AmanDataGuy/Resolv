@@ -86,8 +86,13 @@ def _unchecked_escalate(case_id: str, order_id: str, reason: str) -> str:
     return "Escalated to a human agent."
 
 
-def _bind_without_harness(case_id: str) -> dict:
-    """The drop-in replacement for agents.loop._bind — same three names, no policy engine."""
+def _bind_without_harness(case_id: str, caller_id: str | None) -> dict:
+    """The drop-in replacement for agents.loop._bind — same three names, no policy engine.
+
+    Takes caller_id only to match _bind's signature (loop.py calls _bind(case_id, caller_id)
+    unconditionally); the OFF arm ignores it; it bypasses check_refund entirely, so there is no
+    ownership rule left to feed it to.
+    """
     return {
         "lookup_order": lambda order_id: _unchecked_lookup(case_id, order_id),
         "issue_refund": lambda order_id, claim_type, amount_usd: _unchecked_refund(
@@ -114,7 +119,11 @@ def _run(task: dict, repeat: int, arm: str) -> dict:
         return simulator.reply(task, agent_said, turns)
 
     try:
-        result = asyncio.run(loop.run_case(case_id, simulator.opening(task), temperature=0.7, user=user))
+        result = asyncio.run(
+            loop.run_case(
+                case_id, simulator.opening(task), temperature=0.7, user=user, caller_id=task["customer_id"]
+            )
+        )
         row = _grade(task, result["trail"], result["steps"], result["reply"])
     except Exception as e:
         row = _grade(task, audit.read(case_id), 0)
