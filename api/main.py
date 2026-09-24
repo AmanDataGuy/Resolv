@@ -48,6 +48,12 @@ app = FastAPI(
 # automatically — if "message" is missing, the caller gets a clear 422 error instead of a crash.
 class Complaint(BaseModel):
     message: str
+    # Who is asking. A real deployment would attach this from an authenticated session rather
+    # than trust a request field — there is still no auth layer here (see api/ratelimit.py's own
+    # docstring) — but the harness-side half of that gap is closed: harness/policy.py's rule 2
+    # denies any refund whose caller_id doesn't match the order's customer_id, and requiring the
+    # field here is what makes that check reachable instead of permanently None.
+    customer_id: str
 
 
 @app.get("/health")
@@ -90,7 +96,9 @@ async def resolve(complaint: Complaint, request: Request) -> dict:
     result = None
     for attempt in range(MAX_RESOLVE_ATTEMPTS):
         try:
-            result = await run_case(case_id, complaint.message, temperature=0.0)
+            result = await run_case(
+                case_id, complaint.message, temperature=0.0, caller_id=complaint.customer_id
+            )
             break
         except Exception as e:
             last_error = e
