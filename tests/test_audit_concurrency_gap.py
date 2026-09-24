@@ -50,9 +50,10 @@ class TestSplitSessionDoubleRefund:
         audit.clear(case_a)
         audit.clear(case_b)
         audit.clear_order(order["order_id"])
+        owner = order["customer_id"]
         try:
-            r1 = tools.issue_refund(case_a, order["order_id"], "late_delivery", cap)
-            r2 = tools.issue_refund(case_b, order["order_id"], "late_delivery", cap)
+            r1 = tools.issue_refund(case_a, order["order_id"], "late_delivery", cap, owner)
+            r2 = tools.issue_refund(case_b, order["order_id"], "late_delivery", cap, owner)
             assert r1.startswith("Refunded")
             assert "already refunded" in r2.lower(), r2
         finally:
@@ -70,6 +71,7 @@ class TestConcurrentRefundRace:
         """
         order = _fresh_late_order()
         cap = round(order["amount_usd"] * REFUND_CAP_FRACTION["late_delivery"], 2)
+        owner = order["customer_id"]
         case = "_test_race_case"
         audit.clear(case)
         audit.clear_order(order["order_id"])
@@ -80,7 +82,7 @@ class TestConcurrentRefundRace:
 
             def attempt():
                 barrier.wait()
-                results.append(tools.issue_refund(case, order["order_id"], "late_delivery", cap))
+                results.append(tools.issue_refund(case, order["order_id"], "late_delivery", cap, owner))
 
             threads = [threading.Thread(target=attempt) for _ in range(n)]
             for t in threads:
