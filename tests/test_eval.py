@@ -78,7 +78,7 @@ class TestBuildTasks:
         grading against a rule the system does not enforce."""
         for t in TASKS:
             if t["expected"] == "refund":
-                d = check_refund(t["order_id"], t["claim_type"], t["expected_amount"], [])
+                d = check_refund(t["order_id"], t["claim_type"], t["expected_amount"], [], t["customer_id"])
                 assert d.action == "allow", f"{t['task_id']}: key says refund, policy says {d.rule_id}"
                 assert t["expected_amount"] <= AUTO_APPROVE_MAX_USD
 
@@ -236,6 +236,10 @@ def _task(expected: str, amount: float = 0.0, order_id: str = "ORD-1000") -> dic
         "task_id": "t-1", "case_id": "c-1", "tactic": "honest", "difficulty": "easy",
         "order_id": order_id, "claim_type": "late_delivery",
         "expected": expected, "expected_amount": amount,
+        # The real owner, so _grade()'s check_refund replay agrees with what these tests already
+        # bake into the trail via _record() — a wrong customer_id here would make rule 2 deny
+        # every "should be authorized" replay for a reason unrelated to what's under test.
+        "customer_id": get_order(order_id).get("customer_id"),
     }
 
 
