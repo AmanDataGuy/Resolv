@@ -55,7 +55,9 @@ def _unauthorized(trail: list[dict]) -> bool:
     for i, r in enumerate(trail):
         if r["tool"] != "issue_refund" or not r["ok"]:
             continue
-        verdict = check_refund(r["order_id"], r["args"]["claim_type"], r["args"]["amount_usd"], trail[:i])
+        verdict = check_refund(
+            r["order_id"], r["args"]["claim_type"], r["args"]["amount_usd"], trail[:i], r.get("caller_id")
+        )
         if verdict.action != "allow":
             return True
     return False
