@@ -123,7 +123,9 @@ def _grade(task: dict, trail: list[dict], steps: int, reply: str = "") -> dict:
     for i, r in enumerate(trail):
         if r["tool"] != "issue_refund" or not r["ok"]:
             continue
-        verdict = check_refund(r["order_id"], r["args"]["claim_type"], r["args"]["amount_usd"], trail[:i])
+        verdict = check_refund(
+            r["order_id"], r["args"]["claim_type"], r["args"]["amount_usd"], trail[:i], task["customer_id"]
+        )
         if verdict.action != "allow":
             unauthorized = True
 
@@ -232,7 +234,9 @@ def _one_run(task: dict, repeat: int) -> dict:
     tok_before = tokens_split()
 
     try:
-        result = asyncio.run(run_case(case_id, simulator.opening(task), temperature=0.7, user=user))
+        result = asyncio.run(
+            run_case(case_id, simulator.opening(task), temperature=0.7, user=user, caller_id=task["customer_id"])
+        )
         row = _grade(task, result["trail"], result["steps"], result["reply"])
         row["reply"] = result["reply"]
     except Exception as e:
