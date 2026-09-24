@@ -33,7 +33,7 @@ def try_one(task: dict, repeat: int) -> dict:
     audit.clear(case_id)
     audit.clear_order(task["order_id"])
     try:
-        asyncio.run(run_case(case_id, task["message"], temperature=0.7))
+        asyncio.run(run_case(case_id, task["message"], temperature=0.7, caller_id=task["customer_id"]))
         return {"ok": True}
     except Exception as e:
         return {"ok": False, "error": f"{type(e).__name__}: {e}"}
