@@ -197,6 +197,18 @@ flagged as open rather than fixed: the 6-second budget was a number picked befor
 measurement existed, and the honest next step is either recalibrating it against what's actually
 achievable, or investigating which specific tasks drive the tail.
 
+**Tested a real fix, got a real negative result.** `gpt-oss-120b` supports a documented
+`reasoning_effort` parameter (low/medium/high) trading reasoning depth for latency — this is the
+actual mechanism behind the diagnosis above, not a guess, and `agents/runner_utils.py::complete()`
+now supports it (opt-in via `REASONING_EFFORT`, since litellm 1.91.0 doesn't recognise Groq as a
+supported provider for this param yet and it has to be forced through via
+`allowed_openai_params`). A real before/after comparison (5 tasks, 1 repeat each, $0 on Groq) found
+`reasoning_effort=low` did **not** help: avg total latency 4.19s→5.09s, avg first-action
+2.92s→4.17s, and one task's resolution outcome flipped from resolved to not (4/5 vs 5/5). n=5 is
+small and noisy — this is not proof it never helps — but there's no positive signal here to act
+on, so it is NOT recommended or defaulted to. Left in the code as a real, working, opt-in
+capability for whoever wants to re-test it at a larger sample.
+
 ### 5.3 Cost
 
 **File:** `eval/cost.py` — same 5-task set x 3 repeats = 15 resolutions, priced with the same
@@ -211,13 +223,13 @@ USD_PER_MTOK_IN / USD_PER_MTOK_OUT constants `eval/runner.py` already defines.
 | projection @ 2,000 req/day | $25.50/day -> **$764.87/month** |
 | budget SLO (<=$0.02/request) | **PASS** |
 
-**A known measurement gap, not a real cost:** these pricing constants are calibrated specifically to
-Gemini 3.5 Flash list price. Since switching the default provider to Groq (free tier), re-running
-this file would still price Groq's token counts against Gemini's rate card — producing a nonzero
-dollar figure for traffic that's actually free (subject to Groq's 100k-tokens/day/org quota, not a
-per-token bill). The token counts are trustworthy on any provider; the dollar figure currently is
-not, unless the provider is Gemini. Making the pricing table provider-aware is a known, unbuilt
-follow-up.
+**FIXED since this baseline was pinned.** `eval/cost.py` is now provider-aware. Real numbers,
+re-measured live (15 resolutions, $0.00 on Groq): avg 3,826 prompt / 598 completion tokens, and
+the report now shows **$0.00 (free tier)** honestly instead of a borrowed Gemini rate, alongside
+what it WOULD cost on Groq's real paid/dev-tier list price ($0.15/$0.60 per Mtok, checked against
+Groq's own docs) — **$0.000933/request, ~$56/month at 2,000 req/day**. OpenRouter gets the same
+honest treatment: no single rate is stated (it depends entirely on which model `LLM_MODEL` routes
+to), with a clearly-labeled Gemini-equivalent comparison number instead of a fabricated real one.
 
 **A related fix made this session:** `agents/runner_utils.py`'s token counter previously only
 tracked the litellm-based tool-calling loop — the extractor's separate ADK call was invisible to
@@ -358,23 +370,46 @@ resolved correctly with zero unauthorized refunds. Raw data: `data/eval/pressure
     honestly: per-case-file, not one global ledger (a whole file deleted leaves no trace elsewhere)
     — see the module docstring for the exact boundary, and `tests/test_harness.py`'s
     `TestAuditTrail` for a test that deliberately documents rather than hides that limit.
+13. **Added mock session tokens** (`api/auth.py`) — `POST /token` issues a signed, expiring token
+    for a `customer_id`; `/resolve` now requires and verifies one instead of trusting a bare
+    field. Dependency-free (stdlib `hmac`/`hashlib`), same "be honest about what's mocked" pattern
+    `integrations/notify.py` already uses. Not real identity verification — no login system exists
+    to check a token's claim against — but it closes the "anyone can type any customer_id" gap.
+14. **Made `eval/cost.py` provider-aware.** Previously always priced at Gemini's rate regardless
+    of the active provider — a real cost report on Groq showed $0.0127/request for traffic that's
+    actually free. Now reports each provider's own real number, or an honestly-labeled comparison
+    estimate where no single real number exists (OpenRouter).
+15. **Tested `reasoning_effort` against the latency SLO miss and got a real negative result.**
+    `gpt-oss-120b` supports a documented low/medium/high reasoning-depth parameter — the literal
+    mechanism behind the diagnosed tail latency. Wired up as an opt-in (`REASONING_EFFORT` env
+    var, `agents/runner_utils.py`), measured live, and found not to help (section 5.2) — recorded
+    honestly rather than assumed to work because it sounded like it should.
 
 ## 7. What's still open
 
 - ~~**No caller-identity verification.**~~ **FIXED.** See section 6, item 9 — `harness/policy.py`
   rule 2 now denies any refund whose caller doesn't match the order's `customer_id`, and
   `tests/test_hallucination_collision.py` (which proved the gap) now proves the fix.
-- **First-action latency SLO** (section 5.2) — real, unresolved, likely needs either a
-  recalibrated budget or task-level investigation into what drives the tail.
-- **Tone under sustained pressure** (section 5.4) — pattern identified, prompt fix not yet applied.
-- **Cost pricing table is Gemini-specific** (section 5.3) — accurate for Gemini traffic, misleading
-  for Groq or any other provider until made provider-aware.
+- ~~**No authentication — customer_id was a bare trusted field.**~~ **FIXED, partially.**
+  `api/auth.py` adds mock signed session tokens (`POST /token` issues one, `/resolve` requires
+  and verifies one) — the caller must hold a token this server itself issued, not just type a
+  string. Stated plainly: this is NOT real identity verification, since no real login system
+  exists to verify against. It closes the "anyone can claim any customer_id" gap; a real deploy
+  still needs a real identity provider behind `/token`.
+- ~~**Tone under sustained pressure.**~~ **FIXED.** See section 6, item 11 — real before/after
+  measurement, not just a prompt change (0.942 → 0.975 on fresh pressure-tactic resolutions).
+- ~~**Cost pricing table is Gemini-specific.**~~ **FIXED.** See section 5.3 — provider-aware now,
+  each provider reports its own real number (or an honestly-labeled comparison estimate where no
+  single real number exists, e.g. OpenRouter).
+- **First-action latency SLO** — still open. `reasoning_effort` was tested as a real candidate
+  fix and did NOT help (section 5.2) — a negative result worth having, not a fix. Recalibrating
+  the budget or investigating which specific tasks drive the tail remain the honest options.
 - **data/audit/ is local-disk only** — the safety guarantee (the order-scoped refund index,
   the concurrency lock) holds within a single running process. A multi-instance deployment (e.g.
   Cloud Run scaled past one instance) would give each instance its own non-shared filesystem,
   breaking that single-source-of-truth assumption. Fixing this properly means a real shared
-  datastore — a genuine architecture change, not a patch, and the single most important item if
-  this system is ever deployed at more than one instance.
+  datastore — a genuine architecture change, not a patch. Deliberately not built: this project
+  runs single-instance, and the datastore migration isn't worth doing speculatively.
 - **OpenRouter's rate-limit error text is unverified** — the matcher was widened to catch a
   generic "too many requests" phrase as a best-effort guess; no OpenRouter key has been tested
   against a real 429 to confirm it.
