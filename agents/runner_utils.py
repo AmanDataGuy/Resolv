@@ -10,6 +10,7 @@ wait-and-retry) lives, shared with agents/loop.py's litellm-based complete().
 Each call creates a *fresh* in-memory session. The extractor is single-shot (classify
 this one message), so it doesn't need multi-turn conversation memory between calls.
 """
+import os
 import random
 import re
 import time
@@ -114,6 +115,18 @@ def complete(**kwargs):
     failures and a slower error message.
     """
     from litellm import completion
+
+    # gpt-oss models (Groq's openai/gpt-oss-120b, the current default) support a real
+    # reasoning_effort knob (low/medium/high) that trades reasoning depth for latency -- this is
+    # the actual mechanism behind eval_report.md's diagnosed latency SLO miss ("emits internal
+    # reasoning tokens even on simple calls"), not a guess. litellm 1.91.0 doesn't recognise Groq
+    # as a supported provider for this param yet, so it has to be forced through explicitly via
+    # allowed_openai_params -- documented workaround, not a hack invented here (BerriAI/litellm
+    # issue #14163). Opt-in via REASONING_EFFORT so this stays a measured choice, not a silent
+    # default: see eval/latency.py's own before/after comparison before trusting it blindly.
+    effort = os.environ.get("REASONING_EFFORT")
+    if effort and "gpt-oss" in str(kwargs.get("model", "")) and "reasoning_effort" not in kwargs:
+        kwargs = {**kwargs, "reasoning_effort": effort, "allowed_openai_params": ["reasoning_effort"]}
 
     for attempt in range(MAX_LLM_ATTEMPTS):
         try:
