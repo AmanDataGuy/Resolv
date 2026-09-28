@@ -4,7 +4,9 @@ Run it locally with:
 
     uvicorn api.main:app --reload
 
-Then open http://127.0.0.1:8000/docs to try it in the browser, or POST to /resolve.
+Then open http://127.0.0.1:8000/docs to try it in the browser: POST /token with a customer_id to
+get a session token (see api/auth.py for what that does and doesn't prove), then POST /resolve
+with that token and a message.
 
 WHAT THIS FILE IS. This is the thin "front door" of the system. It has NO business logic of its
 own — it just wires four steps together in order:
@@ -26,7 +28,7 @@ from pydantic import BaseModel
 
 from agents.loop import run_case
 from agents.runner_utils import tokens_split
-from api import ratelimit
+from api import auth, ratelimit
 from eval import monitor, observability
 from harness import audit, routing
 from integrations import notify
@@ -48,11 +50,17 @@ app = FastAPI(
 # automatically — if "message" is missing, the caller gets a clear 422 error instead of a crash.
 class Complaint(BaseModel):
     message: str
-    # Who is asking. A real deployment would attach this from an authenticated session rather
-    # than trust a request field — there is still no auth layer here (see api/ratelimit.py's own
-    # docstring) — but the harness-side half of that gap is closed: harness/policy.py's rule 2
-    # denies any refund whose caller_id doesn't match the order's customer_id, and requiring the
-    # field here is what makes that check reachable instead of permanently None.
+    # Who is asking -- proven by holding a token this server issued, not just typed into a field.
+    # See api/auth.py for exactly what this does and doesn't prove (no real login system exists;
+    # this is a mocked session, not identity verification). harness/policy.py's rule 2 still does
+    # the actual enforcement -- this is what makes the caller_id it checks trustworthy input
+    # rather than whatever string happened to be in the request body.
+    token: str
+
+
+class TokenRequest(BaseModel):
+    # Mocks "the customer already proved who they are somewhere else" -- see api/auth.py's
+    # module docstring. A real deployment replaces this endpoint's body, not its callers.
     customer_id: str
 
 
@@ -65,6 +73,16 @@ def health() -> dict:
     log records every request regardless.
     """
     return {"status": "ok", "observability": observability.enabled()}
+
+
+@app.post("/token")
+def issue_token(req: TokenRequest) -> dict:
+    """Mint a session token for a customer_id. See api/auth.py's module docstring for exactly
+    what this does and doesn't prove -- there is no real login behind it. A real deployment
+    replaces this endpoint's body (verify against a real session/identity provider) without
+    changing anything downstream: /resolve only ever sees a verified customer_id either way.
+    """
+    return {"token": auth.issue_token(req.customer_id)}
 
 
 @app.post("/resolve")
@@ -80,6 +98,13 @@ async def resolve(complaint: Complaint, request: Request) -> dict:
     client_id = request.client.host if request.client else "unknown"
     if not ratelimit.is_allowed(client_id):
         raise HTTPException(status_code=429, detail="Too many requests. Please try again shortly.")
+
+    # The token must verify BEFORE anything expensive happens too -- same reasoning as the rate
+    # limit above, and it's what makes complaint.customer_id below trustworthy input rather than
+    # a caller's own unverified claim.
+    customer_id = auth.verify_token(complaint.token)
+    if customer_id is None:
+        raise HTTPException(status_code=401, detail="Missing, invalid, or expired token.")
 
     # A unique id for this case. It names the audit trail this run reads and writes, so two
     # customers never share history. Generated here, never taken from the caller.
@@ -97,7 +122,7 @@ async def resolve(complaint: Complaint, request: Request) -> dict:
     for attempt in range(MAX_RESOLVE_ATTEMPTS):
         try:
             result = await run_case(
-                case_id, complaint.message, temperature=0.0, caller_id=complaint.customer_id
+                case_id, complaint.message, temperature=0.0, caller_id=customer_id
             )
             break
         except Exception as e:
@@ -137,8 +162,10 @@ async def resolve(complaint: Complaint, request: Request) -> dict:
 
 
 def _selfcheck() -> None:
-    """One no-network check: the app builds and /health answers. The /resolve path needs a live
-    model, so it's exercised by the demo and the eval, not here. Run: python -m api.main
+    """No-network checks: the app builds, /health answers, and the token gate actually gates.
+    The /resolve happy path needs a live model, so it's exercised by the demo and the eval, not
+    here -- but the auth rejection paths need no model call at all, so there is no excuse not to
+    check them here. Run: python -m api.main
     """
     from fastapi.testclient import TestClient
 
@@ -146,7 +173,17 @@ def _selfcheck() -> None:
     r = client.get("/health")
     assert r.status_code == 200 and r.json()["status"] == "ok"
     assert "observability" in r.json(), "health should report whether Langfuse tracing is live"
-    print("api selfcheck OK — /health responds")
+
+    r = client.post("/token", json={"customer_id": "demo-customer"})
+    assert r.status_code == 200 and "token" in r.json()
+
+    r = client.post("/resolve", json={"message": "hi"})
+    assert r.status_code == 422, "a missing token must be a validation error, not a 401 guess"
+
+    r = client.post("/resolve", json={"message": "hi", "token": "forged.garbage"})
+    assert r.status_code == 401, "an invalid token must be rejected before any agent call"
+
+    print("api selfcheck OK — /health responds, /token issues, /resolve rejects a bad token")
 
 
 if __name__ == "__main__":
