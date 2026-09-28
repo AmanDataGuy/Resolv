@@ -79,12 +79,11 @@ def report(rows: list[dict]) -> None:
     # was the exact gap eval_report.md flagged. Show the real number for whoever is actually
     # configured, not a borrowed one.
     if LLM_PROVIDER == "groq":
-        free_cost = 0.0
         paid_in, paid_out = _GROQ_PAID_USD_PER_MTOK
         paid_costs = [r["prompt"] / 1e6 * paid_in + r["completion"] / 1e6 * paid_out for r in rows]
         avg_paid = sum(paid_costs) / n
-        print(f"avg cost / request  : $0.000000  (Groq free tier -- $0/token, bounded by the "
-              f"100k-tokens/day/org quota instead of a bill)")
+        print("avg cost / request  : $0.000000  (Groq free tier -- $0/token, bounded by the "
+              "100k-tokens/day/org quota instead of a bill)")
         print(f"   if on Groq's paid/dev tier instead: ${avg_paid:.6f}/request "
               f"(${paid_in}/${paid_out} per Mtok in/out)")
         avg_cost, budget_note = avg_paid, " (paid-tier estimate; free tier is $0)"
@@ -93,8 +92,8 @@ def report(rows: list[dict]) -> None:
             r["prompt"] / 1e6 * USD_PER_MTOK_IN + r["completion"] / 1e6 * USD_PER_MTOK_OUT
             for r in rows
         ) / n
-        print(f"avg cost / request  : not stated -- OpenRouter's real rate depends entirely on "
-              f"which underlying model LLM_MODEL routes to (free vs paid vary by 10-100x)")
+        print("avg cost / request  : not stated -- OpenRouter's real rate depends entirely on "
+              "which underlying model LLM_MODEL routes to (free vs paid vary by 10-100x)")
         print(f"   at Gemini-equivalent rates, for comparison only: ${avg_gemini_equiv:.6f}/request")
         avg_cost, budget_note = avg_gemini_equiv, " (comparison estimate, not OpenRouter's real rate)"
     else:
