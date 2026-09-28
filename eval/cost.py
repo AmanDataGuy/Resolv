@@ -31,6 +31,13 @@ REPEATS = 3               # cost is stable -> needs far fewer repeats than laten
 REQUESTS_PER_DAY = 2000               # set to your expected traffic
 COST_BUDGET_PER_REQUEST_USD = 0.02    # the offline pass/fail line -- tune to your economics
 
+# eval/runner.py's USD_PER_MTOK_IN/OUT are Gemini's rates specifically -- fine as the shared
+# scorecard basis everywhere else (a stable comparison unit), but wrong to print as THIS report's
+# dollar figure on any other provider, which is exactly the gap eval_report.md flagged. Real
+# published rates, not guesses: Groq's is openai/gpt-oss-120b's paid/dev-tier list price
+# (console.groq.com/docs/model/openai/gpt-oss-120b, checked when this was written).
+_GROQ_PAID_USD_PER_MTOK = (0.15, 0.60)
+
 
 # --- MEASURE -----------------------------------------------------------------------------
 def measure_one(task: dict, repeat: int) -> dict:
@@ -56,10 +63,8 @@ def benchmark() -> list[dict]:
 # --- REPORT ------------------------------------------------------------------------------
 def report(rows: list[dict]) -> None:
     n = len(rows)
-    avg_cost = sum(r["cost"] for r in rows) / n
     avg_prompt = sum(r["prompt"] for r in rows) / n
     avg_completion = sum(r["completion"] for r in rows) / n
-    min_cost, max_cost = min(r["cost"] for r in rows), max(r["cost"] for r in rows)
 
     print(f"provider={LLM_PROVIDER}  model={MODEL}")
     print("=" * 60)
@@ -68,18 +73,46 @@ def report(rows: list[dict]) -> None:
     print(f"samples             : {n}")
     print(f"avg prompt tokens   : {avg_prompt:.0f}")
     print(f"avg completion tok  : {avg_completion:.0f}")
-    print(f"avg cost / request  : ${avg_cost:.6f}")
-    print(f"   min / max        : ${min_cost:.6f} / ${max_cost:.6f}  "
-          f"(tight range = stable, unlike latency)")
+
+    # Token counts are trustworthy on any provider (measured directly). The DOLLAR figure is
+    # provider-specific and was wrong to compute with Gemini's rate on anything else -- that
+    # was the exact gap eval_report.md flagged. Show the real number for whoever is actually
+    # configured, not a borrowed one.
+    if LLM_PROVIDER == "groq":
+        free_cost = 0.0
+        paid_in, paid_out = _GROQ_PAID_USD_PER_MTOK
+        paid_costs = [r["prompt"] / 1e6 * paid_in + r["completion"] / 1e6 * paid_out for r in rows]
+        avg_paid = sum(paid_costs) / n
+        print(f"avg cost / request  : $0.000000  (Groq free tier -- $0/token, bounded by the "
+              f"100k-tokens/day/org quota instead of a bill)")
+        print(f"   if on Groq's paid/dev tier instead: ${avg_paid:.6f}/request "
+              f"(${paid_in}/${paid_out} per Mtok in/out)")
+        avg_cost, budget_note = avg_paid, " (paid-tier estimate; free tier is $0)"
+    elif LLM_PROVIDER == "openrouter":
+        avg_gemini_equiv = sum(
+            r["prompt"] / 1e6 * USD_PER_MTOK_IN + r["completion"] / 1e6 * USD_PER_MTOK_OUT
+            for r in rows
+        ) / n
+        print(f"avg cost / request  : not stated -- OpenRouter's real rate depends entirely on "
+              f"which underlying model LLM_MODEL routes to (free vs paid vary by 10-100x)")
+        print(f"   at Gemini-equivalent rates, for comparison only: ${avg_gemini_equiv:.6f}/request")
+        avg_cost, budget_note = avg_gemini_equiv, " (comparison estimate, not OpenRouter's real rate)"
+    else:
+        avg_cost = sum(r["cost"] for r in rows) / n
+        min_cost, max_cost = min(r["cost"] for r in rows), max(r["cost"] for r in rows)
+        print(f"avg cost / request  : ${avg_cost:.6f}")
+        print(f"   min / max        : ${min_cost:.6f} / ${max_cost:.6f}  "
+              f"(tight range = stable, unlike latency)")
+        budget_note = ""
     print("-" * 60)
 
     daily = avg_cost * REQUESTS_PER_DAY
-    print(f"projection @ {REQUESTS_PER_DAY}/day : ${daily:.2f}/day  ${daily * 30:.2f}/month")
+    print(f"projection @ {REQUESTS_PER_DAY}/day : ${daily:.2f}/day  ${daily * 30:.2f}/month{budget_note}")
     print("-" * 60)
 
     verdict = "PASS" if avg_cost <= COST_BUDGET_PER_REQUEST_USD else "FAIL"
     print(f"BUDGET: cost/request <= ${COST_BUDGET_PER_REQUEST_USD}  ->  "
-          f"${avg_cost:.6f}   [{verdict}]")
+          f"${avg_cost:.6f}   [{verdict}]{budget_note}")
 
 
 def main() -> None:
