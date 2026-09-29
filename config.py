@@ -7,9 +7,9 @@ here:
   1. Provider + model resolution — MODEL is the litellm model string every call uses, and
      get_model() wraps it for ADK. The active provider is chosen once (see below), so no call
      site has a per-provider branch.
-  2. Key rotation — up to three <PROVIDER>_API_KEY_* values. litellm resolves the provider's
-     key from the environment fresh on every request, so rotating which value sits in
-     os.environ[<env var>] moves the next call to a different key with no rebuild. rotate_key()
+  2. Key rotation — any number of <PROVIDER>_API_KEY_* values (_2, _3, _4, ...). litellm resolves
+     the provider's key from the environment fresh on every request, so rotating which value sits
+     in os.environ[<env var>] moves the next call to a different key with no rebuild. rotate_key()
      is called after a rate-limit error in agents/runner_utils.py and returns False once every
      key is exhausted.
   3. Policy thresholds — the exact numbers harness/policy.py enforces, kept here so they're
@@ -71,17 +71,20 @@ _DEFAULT_MODEL, _KEY_ENV = _PROVIDERS[LLM_PROVIDER]
 #   LLM_MODEL=openrouter/meta-llama/llama-3.3-70b-instruct python -m eval.runner
 MODEL = os.environ.get("LLM_MODEL") or _DEFAULT_MODEL
 
-# Key rotation over <PROVIDER>_API_KEY, _2, _3. litellm reads os.environ[_KEY_ENV] fresh each
-# request, so rotating the value there is enough to move the next call to a different key.
-_KEYS = [
-    v
-    for v in (
-        os.environ.get(_KEY_ENV),
-        os.environ.get(f"{_KEY_ENV}_2"),
-        os.environ.get(f"{_KEY_ENV}_3"),
-    )
-    if v
-]
+# Key rotation over <PROVIDER>_API_KEY, _2, _3, _4, ... as many as are set. litellm reads
+# os.environ[_KEY_ENV] fresh each request, so rotating the value there is enough to move the next
+# call to a different key. No fixed cap: each suffix is checked in order and the scan stops at
+# the first gap, so GROQ_API_KEY_2..GROQ_API_KEY_5 all get picked up automatically -- rotation is
+# most valuable when each key is a SEPARATE account/org (Groq's quota is per-org, confirmed by
+# the "in organization org_..." text in its own rate-limit errors), since then N keys genuinely
+# means N times the daily quota, not N keys sharing one bucket.
+_KEYS = []
+if os.environ.get(_KEY_ENV):
+    _KEYS.append(os.environ[_KEY_ENV])
+    i = 2
+    while os.environ.get(f"{_KEY_ENV}_{i}"):
+        _KEYS.append(os.environ[f"{_KEY_ENV}_{i}"])
+        i += 1
 _key_index = 0
 if _KEYS:
     os.environ[_KEY_ENV] = _KEYS[0]  # pin to the first key so rotation has a known start
