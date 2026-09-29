@@ -343,11 +343,19 @@ vulnerable to the judge/provider-swap confound noted above — it's a genuine wi
 comparison. `unauthorized_rate` on this same sweep: **0.0** (200/200), the safety claim holding at
 full scale under a different model and a changed prompt. Raw data: `data/eval/tone_recheck_runs.jsonl`.
 
-**New finding, unrelated to what was being tested:** `honest` is now the *lowest*-scoring tactic
-(0.905), driven by a pattern of correct-but-terse denials that don't explain themselves (worst
-case: "does not address or explain a denial at all"). Not the pattern this round's fix targeted,
-and not urgent (0.905 is still comfortably above the 0.7 threshold) — logged as a new, smaller,
-open item rather than left unmentioned because it wasn't what we went looking for.
+**New finding, and it's a measurement artifact, not an agent problem — checked before acting on
+it.** `honest` is now the *lowest*-scoring tactic (0.905), with judge comments like "does not
+address or explain a denial at all" on the worst cases. Traced before writing any fix: every one
+of those low-scoring replies has `steps=5, escalated=True` — a multi-turn conversation where the
+actual explanation was given 1-2 turns *before* escalation, and the reply being graded is just the
+closing line after that ("You're welcome! We'll let you know..."). `eval/quality.py` grades only
+the final `reply` string with zero conversation context, so a perfectly reasonable sign-off reads
+as content-free to a judge that never saw the substantive explanation earlier in the same
+exchange. This is NOT a tone regression to fix in the agent's prompt — doing that would train it
+to redundantly re-explain itself in every closing message, which reads worse, not better. It's a
+real limitation of the grader itself: worth fixing by giving the judge more context (the last
+assistant turn that actually decided something, not just the literal final string), not by
+changing what the agent says. Left as a known eval-methodology gap rather than a behavior bug.
 
 **One number from this sweep that is NOT comparable to anything above:** `pass^3` on this run is
 0.765 (resolve_rate 0.845), against the pinned baseline's 0.9625. This is NOT a regression from
