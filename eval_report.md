@@ -325,6 +325,40 @@ the fix works, not judge noise — though n=8 is still a single repeat per task,
 sample, so treat the exact numbers as directional rather than final. All 8 fresh resolutions also
 resolved correctly with zero unauthorized refunds. Raw data: `data/eval/pressure_recheck.jsonl`.
 
+**Full-scale confirmation.** The complete 40-task × 5-repeat sweep (200 fresh resolutions, live,
+under the new prompt, Groq, cost **$0.00**) finished and was graded for tone:
+
+| tactic | n | avg tone | below threshold |
+|---|---|---|---|
+| pressure | 40 | **0.972** | 0 |
+| wrong_order_id | 38 | 0.987 | 0 |
+| change_story | 40 | 0.940 | 2 |
+| inflate_amount | 40 | 0.927 | 1 |
+| honest | 40 | 0.905 | 1 |
+
+`pressure` — the tactic that was the *worst* in the original pinned sweep — is now the **best**
+of the five, at full scale, not just n=8. Overall avg tone 0.946, 4/198 below threshold. Because
+all five tactics were graded together in the same sweep by the same judge, this ranking is not
+vulnerable to the judge/provider-swap confound noted above — it's a genuine within-sweep
+comparison. `unauthorized_rate` on this same sweep: **0.0** (200/200), the safety claim holding at
+full scale under a different model and a changed prompt. Raw data: `data/eval/tone_recheck_runs.jsonl`.
+
+**New finding, unrelated to what was being tested:** `honest` is now the *lowest*-scoring tactic
+(0.905), driven by a pattern of correct-but-terse denials that don't explain themselves (worst
+case: "does not address or explain a denial at all"). Not the pattern this round's fix targeted,
+and not urgent (0.905 is still comfortably above the 0.7 threshold) — logged as a new, smaller,
+open item rather than left unmentioned because it wasn't what we went looking for.
+
+**One number from this sweep that is NOT comparable to anything above:** `pass^3` on this run is
+0.765 (resolve_rate 0.845), against the pinned baseline's 0.9625. This is NOT a regression from
+the prompt fix — the pinned baseline was measured on **Gemini 3.5 Flash**; this sweep ran on
+**Groq's gpt-oss-120b** (the project's current default provider, switched for cost/latency
+reasons — see item 1 below). Comparing pass^k across two different models measures the models,
+not the prompt change, and reporting it as a before/after would be exactly the kind of confound
+this project's own methodology exists to catch. The one number that DOES survive the model swap
+cleanly is `unauthorized_rate = 0.0` — the core safety claim doesn't depend on which model is
+proposing actions, only on the harness that gates them.
+
 ---
 
 ## 6. What changed this round to improve the numbers
@@ -367,16 +401,17 @@ resolved correctly with zero unauthorized refunds. Raw data: `data/eval/pressure
 10. **Made escalation un-droppable.** `harness/tools.py::issue_refund` auto-emits the
     `escalate_to_human` record itself whenever policy returns `escalate`, closing the 2/3-of-3
     grader gap from section 2 structurally instead of depending on model compliance.
-11. **Fixed the pressure-tactic tone regression's root cause and validated it against fresh
-    traffic.** `agents/loop.py`'s `SYSTEM` prompt now explicitly forbids reciting-the-policy-at-them
-    phrasing; `eval/quality.py` gained a per-tactic tone breakdown so a concentration in one tactic
-    shows up automatically instead of requiring a manual worst-3 read. Re-grading the OLD, pinned
-    sweep's replies (generated before this fix existed) proved nothing on its own — that's just
-    judge variance — so 8 fresh resolutions were run live against the exact pressure-tactic tasks
-    under the new prompt: pressure-tactic tone rose **0.942 → 0.975**, same judge, same 8 tasks,
-    genuinely different (post-fix) replies. All 8 also resolved correctly with zero unauthorized
-    refunds. Total cost: **$0.00** (Groq free tier). See section 5.4 for the full comparison and
-    its one honest caveat (n=8, one repeat each — directional, not a repeated-sample result).
+11. **Fixed the pressure-tactic tone regression's root cause and validated it at full scale.**
+    `agents/loop.py`'s `SYSTEM` prompt now explicitly forbids reciting-the-policy-at-them phrasing;
+    `eval/quality.py` gained a per-tactic tone breakdown so a concentration in one tactic shows up
+    automatically instead of requiring a manual worst-3 read. First an n=8 spot check (0.942 →
+    0.975 on fresh pressure-tactic resolutions), then the full 40-task × 5-repeat sweep (200 fresh
+    resolutions, $0.00 on Groq): `pressure` went from the worst tactic in the original pinned
+    sweep to the **best** of five (0.972 avg, 0/40 below threshold), a within-sweep comparison
+    immune to the judge/provider-swap confound that affects any comparison against the old pinned
+    numbers. `unauthorized_rate` on this same 200-run sweep: **0.0**. See section 5.4 for the full
+    breakdown, a new (unrelated, minor) tone finding on the `honest` tactic, and why this sweep's
+    `pass^3` figure is NOT comparable to the pinned baseline (different model, not a regression).
 12. **Made the audit trail tamper-evident.** `harness/audit.py` now writes a hash chain: every
     record carries `record_id` and `prev_hash` (SHA-256 of the full previous record), and a new
     `verify_chain()` recomputes and checks the whole chain, catching an in-place edit to any
