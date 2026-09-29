@@ -197,6 +197,21 @@ flagged as open rather than fixed: the 6-second budget was a number picked befor
 measurement existed, and the honest next step is either recalibrating it against what's actually
 achievable, or investigating which specific tasks drive the tail.
 
+**The task-difficulty hypothesis above was wrong — corrected by real data.** Analyzing 136+ real
+resolutions (from the tone-revalidation sweep, section 5.4) against total latency: `difficulty`
+barely matters (easy/medium/hard all within 2s of each other, 13.9-16.3s avg) — the actual driver
+is **step count**, almost linearly (2 steps→5s, 4→11.5s, 6→17.6s, 9-10→~38s), and step count is
+driven by which **adversarial tactic** is in play, not the complaint's inherent complexity.
+`inflate_amount` and `wrong_order_id`/`change_story` (the tactics that force the agent into
+back-and-forth correction) average 16-19s and 5.5-5.8 steps; `honest` averages 12.5s and 4.2
+steps. A handful of specific tasks are consistently slow across all 5 of their repeats — a real,
+reproducible property of those complaint+tactic combinations, not noise. Caveat: this measures
+*total* latency, not the specific *first-action* p95 the SLO is about — that needs the
+event-level timestamps `eval/latency.py` captures separately, not yet cross-referenced against
+this breakdown. The corrected mental model — the tail is about how many correction rounds an
+adversarial customer forces, not raw task difficulty — is still open as an unsolved SLO, but it's
+now a falsifiable, specific claim instead of a guess.
+
 **Tested a real fix, got a real negative result.** `gpt-oss-120b` supports a documented
 `reasoning_effort` parameter (low/medium/high) trading reasoning depth for latency — this is the
 actual mechanism behind the diagnosis above, not a guess, and `agents/runner_utils.py::complete()`
