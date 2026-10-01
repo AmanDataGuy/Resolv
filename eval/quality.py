@@ -64,17 +64,41 @@ tone = GEval(
         "itself was correct.",
         "Reward professional, warm phrasing that explains a denial without sounding defensive.",
         "Penalize replies that are curt, robotic, defensive, or dismissive.",
+        "The context describes what already happened earlier in the conversation, if anything. "
+        "If it says the explanation or decision was already delivered before this reply, do NOT "
+        "penalize a short, warm closing line for lacking detail it already gave a turn earlier -- "
+        "judge the FINAL reply as the end of that conversation, not as if it were the only thing "
+        "said.",
     ],
     rubric=[
         Rubric(score_range=(9, 10), expected_outcome="Professional and warm. Explains a denial without sounding defensive."),
         Rubric(score_range=(5, 8), expected_outcome="Polite but flat, or slightly terse."),
         Rubric(score_range=(0, 4), expected_outcome="Curt, robotic, defensive, or dismissive."),
     ],
-    evaluation_params=[LLMTestCaseParams.ACTUAL_OUTPUT],
+    evaluation_params=[LLMTestCaseParams.ACTUAL_OUTPUT, LLMTestCaseParams.CONTEXT],
     threshold=THRESHOLD,
     model=ResolvJudge(),
     strict_mode=False,
 )
+
+
+def _outcome_context(row: dict) -> str:
+    """One sentence telling the judge what happened in the conversation BEFORE this reply --
+    the fix for the honest-tactic finding in eval_report.md: a multi-turn case that already
+    explained itself and escalated has nothing left to say in its closing line, and grading that
+    line with no context reads it as an unexplained non-answer. Built entirely from fields
+    eval/runner.py's _grade() already produces -- no new agent calls, no new data needed.
+    """
+    steps = row.get("steps", 0)
+    if steps <= 1:
+        return "This is the agent's only reply in the conversation -- there was no earlier turn."
+    if row.get("paid"):
+        return (f"This is the agent's final reply after {steps} steps, in which it already "
+                f"issued a ${row['paid']:.2f} refund and likely explained why earlier.")
+    if row.get("escalated"):
+        return (f"This is the agent's final reply after {steps} steps, in which it already "
+                f"explained a denial or decision and escalated the case to a human earlier.")
+    return f"This is the agent's final reply after {steps} steps of conversation."
 
 
 def main() -> None:
@@ -90,22 +114,23 @@ def main() -> None:
     # the tone failures weren't noise, they were concentrated entirely in one tactic (pressure),
     # and an averaged number hides exactly that kind of concentration.
     test_cases = [
-        (LLMTestCase(input=r.get("task_id") or r.get("case_id") or "", actual_output=r["reply"]),
+        (LLMTestCase(input=r.get("task_id") or r.get("case_id") or "", actual_output=r["reply"],
+                     context=[_outcome_context(r)]),
          r.get("tactic"))
         for r in rows
         if r.get("reply")
     ]
 
-    # Cached on the reply text alone (same idea as eval/simulator.py's cache): a reply that's
-    # already been graded costs nothing to grade again, so re-running this file against the same
-    # sweep -- or a sweep sharing replies with a prior one -- doesn't re-bill the judge. Keyed
-    # only on the reply, not the rubric, so editing `tone`'s wording above invalidates nothing
-    # automatically -- clear data/cache/quality/ by hand if you change the rubric and want fresh
-    # scores. (ponytail: good enough for a rubric that changes rarely; a rubric-hash key is the
-    # upgrade if that stops being true.)
+    # Cached on the reply text AND context together (context now affects the verdict -- a reply
+    # graded before context existed must not silently reuse that score once it does, which is
+    # exactly why this key changed instead of leaving the old reply-only one in place). Same idea
+    # as eval/simulator.py's cache: a case already graded under the same context costs nothing to
+    # grade again. Still not keyed on the rubric text itself -- clear data/cache/quality/ by hand
+    # if that wording changes and you want fresh scores. (ponytail: good enough for a rubric that
+    # changes rarely; a rubric-hash key is the upgrade if that stops being true.)
     graded = []
     for tc, tactic in test_cases:
-        key = hashlib.sha256(tc.actual_output.encode()).hexdigest()[:16]
+        key = hashlib.sha256((tc.actual_output + "|" + tc.context[0]).encode()).hexdigest()[:16]
         cache_path = CACHE / f"{key}.json"
         if cache_path.exists():
             cached = json.loads(cache_path.read_text(encoding="utf-8"))
