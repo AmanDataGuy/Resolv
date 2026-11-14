@@ -260,7 +260,8 @@ async def run_case_events(
     spent = {"prompt": 0, "completion": 0, "cached": None, "usd": 0.0, "served": None}
     started = time.monotonic()
     durable = _durable()
-    journal = ledger.steps(case_id) if durable else []
+    # Journal and trail I/O runs in a thread: a sync SQLite commit (fsync) on the loop stalls every request.
+    journal = await asyncio.to_thread(ledger.steps, case_id) if durable else []
     seq = 0
 
     # Run one step, or return its journaled result when this case already completed it before a crash.
@@ -271,7 +272,7 @@ async def run_case_events(
             return _load_step(kind, journal[seq - 1])
         out = await run()
         if durable:
-            ledger.add_step(case_id, seq, kind, out.model_dump() if kind == "llm" else out)
+            await asyncio.to_thread(ledger.add_step, case_id, seq, kind, out.model_dump() if kind == "llm" else out)
         return out
 
     try:
@@ -309,7 +310,7 @@ async def run_case_events(
             if not msg.tool_calls:
                 # The reply is checked against the trail BEFORE it can reach a customer.
                 reply = msg.content or ""
-                trail_so_far = audit.read(case_id)
+                trail_so_far = await asyncio.to_thread(audit.read, case_id)
                 paid_so_far = sum(
                     r["args"]["amount_usd"] for r in trail_so_far if r["tool"] == "issue_refund" and r["ok"]
                 )
