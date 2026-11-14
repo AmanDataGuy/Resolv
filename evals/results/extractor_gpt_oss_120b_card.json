@@ -1,0 +1,61 @@
+{
+  "manifest": {
+    "run_id": "2026-11-14T06-38-41+00-00-openrouter-extractor",
+    "git_sha": "dc5d6e8",
+    "git_dirty": true,
+    "provider": "openrouter",
+    "agent_model": "openrouter/openai/gpt-oss-120b",
+    "extractor_model": "openrouter/openai/gpt-oss-120b",
+    "simulator_model": "openrouter/openai/gpt-oss-120b",
+    "judge_model": "openrouter/openai/gpt-oss-120b",
+    "prompt_sha": "88916d9bcec3",
+    "dataset_sha": "9e2ab9486547",
+    "openings_sha": "f8d8d2c63d8e",
+    "temperature": null,
+    "seed": 0,
+    "started_at": "2026-11-14T06:38:41+00:00"
+  },
+  "card": {
+    "n": 92,
+    "order_acc": 0.9565,
+    "claim_acc": 0.9348,
+    "both_acc": 0.8913,
+    "both_ci95": [
+      0.8114,
+      0.9399
+    ],
+    "both_se": 0.0325,
+    "hallucination_rate": 0.3077,
+    "abstention_n": 13,
+    "by_difficulty": {
+      "easy": {
+        "n": 21,
+        "both": 0.9048
+      },
+      "hard": {
+        "n": 30,
+        "both": 0.8
+      },
+      "medium": {
+        "n": 41,
+        "both": 0.9512
+      }
+    },
+    "claim_confusion": {
+      "late_delivery": {
+        "late_delivery": 55,
+        "(none)": 3
+      },
+      "never_arrived": {
+        "never_arrived": 17,
+        "late_delivery": 3
+      },
+      "order_canceled": {
+        "order_canceled": 14
+      }
+    },
+    "errors": 0,
+    "p50_latency_s": 1.66,
+    "usd_total": 0.0186
+  }
+}
