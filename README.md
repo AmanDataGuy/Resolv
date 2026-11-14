@@ -18,6 +18,7 @@
 </p>
 
 <p align="center">
+  <a href="TECHNICAL_REPORT.md">Technical report</a> ·
   <a href="docs/eval_report.md">Eval report</a> ·
   <a href="docs/architecture.md">Architecture</a> ·
   <a href="docs/THREAT_MODEL.md">Threat model</a> ·
@@ -101,7 +102,7 @@ harness off, the same model pays 16 refunds it should not. More in [architecture
 git clone https://github.com/AmanDataGuy/Resolv && cd Resolv
 python3.11 -m venv venv && source venv/bin/activate
 pip install -r requirements-dev.txt
-pytest -q                                  # 460 tests, no network, no key
+pytest -q                                  # 460 tests; with no key the 2 tone-judge tests skip
 cp .env.example .env                       # add one provider key
 uvicorn resolv.api.main:app --port 8010    # POST /token, POST /resolve, /console, /health
 streamlit run app.py                       # the demo UI
@@ -124,8 +125,9 @@ canned model replies.
 | Error analysis             |        100 runs coded |    10 failure categories | found and closed a split-refund approval bypass |
 
 CI runs the keyless suite, replays recorded trajectories and checks the eval gate's false-positive rate on every
-push. A nightly job gates the live model against a pinned baseline. Method, every run and the older July 2026
-numbers: [eval report](docs/eval_report.md), [metrics](docs/eval/METRICS.md), [red team](docs/eval/REDTEAM.md).
+push. A nightly job, when a `GROQ_API_KEY` secret is set, gates the live extractor against a pinned baseline; the
+agent gate joins once the full sweep is saved as a baseline. Method, every run and the older July 2026 numbers:
+[eval report](docs/eval_report.md), [metrics](docs/eval/METRICS.md), [red team](docs/eval/REDTEAM.md).
 
 <!-- src: evals/results/*_gpt_oss_120b*_card.json, inference/results/extractor/serve_regex.json,
      evals/results/ops_*_card.json, loadtest/results/fake_llm_knee.json -->
@@ -142,6 +144,7 @@ numbers: [eval report](docs/eval_report.md), [metrics](docs/eval/METRICS.md), [r
 
 | Topic                                      | Where                                                                                                 |
 | :----------------------------------------- | :---------------------------------------------------------------------------------------------------- |
+| Technical report: every eval and test      | [TECHNICAL_REPORT.md](TECHNICAL_REPORT.md)                                                            |
 | Architecture, layout, settings             | [docs/architecture.md](docs/architecture.md)                                                          |
 | Product requirements                       | [docs/PRD.md](docs/PRD.md)                                                                            |
 | Threat model                               | [docs/THREAT_MODEL.md](docs/THREAT_MODEL.md)                                                          |
