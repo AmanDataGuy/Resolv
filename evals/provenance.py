@@ -39,6 +39,11 @@ def now() -> str:
     return datetime.now(timezone.utc).isoformat(timespec="seconds")
 
 
+# the open weights behind a litellm model string ("groq/openai/gpt-oss-120b" -> "openai/gpt-oss-120b")
+def weights_of(model: str) -> str:
+    return (model or "").split("/", 1)[-1]
+
+
 # provider name from a litellm model string ("groq/openai/gpt-oss-120b" -> "groq")
 def provider_of(model: str) -> str:
     prefix = (model or "").split("/")[0]

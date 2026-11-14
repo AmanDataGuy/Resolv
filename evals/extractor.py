@@ -179,7 +179,7 @@ def main() -> None:
         if not Path(args.baseline).exists():
             raise SystemExit(f"no baseline at {args.baseline}. Pin one with --save-baseline first.")
         base = json.loads(Path(args.baseline).read_text(encoding="utf-8"))
-        if base.get("model") != config.EXTRACTOR_MODEL:
+        if provenance.weights_of(base.get("model")) != provenance.weights_of(config.EXTRACTOR_MODEL):
             raise SystemExit(f"baseline model {base.get('model')} != EXTRACTOR_MODEL {config.EXTRACTOR_MODEL}")
         verdict = compare(rows, base)
         print(f"\n  vs baseline: {verdict}")

@@ -13,7 +13,7 @@ one worker because free-tier rate-limit backoff assumes a single caller.
 (`_grade`), scripts/record_cassettes.py, evals/replay.py.
 
     python -m evals.runner                                    # 40 tasks x 5 repeats
-    python -m evals.runner --subset 8 --n 2 --k 1 --gate evals/baselines/agent_ref_groq.json   # nightly smoke
+    python -m evals.runner --subset 8 --n 2 --k 1 --gate evals/baselines/agent_ref_gpt_oss_120b.json   # nightly smoke
 """
 import os
 
@@ -237,7 +237,8 @@ def main() -> None:
         if not Path(args.gate).exists():
             raise SystemExit(f"no baseline at {args.gate}; pin one with --save-baseline {args.gate}")
         baseline = json.loads(Path(args.gate).read_text(encoding="utf-8"))
-        if baseline.get("model") != config.AGENT_MODEL:
+        # the same weights on another host (Groq, OpenRouter) count as the same model
+        if provenance.weights_of(baseline.get("model")) != provenance.weights_of(config.AGENT_MODEL):
             raise SystemExit(f"baseline model {baseline.get('model')} != AGENT_MODEL {config.AGENT_MODEL}; "
                              "the gate only compares a model against its own baseline")
         v = gate.verdict(main_rows, baseline["rows"])

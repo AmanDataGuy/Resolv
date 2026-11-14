@@ -78,7 +78,7 @@ def false_positive_rate(base_rows: list[dict], task_ids: list[str], runs_per_tas
 # CLI: measure the gate's false-positive rate on a pinned baseline
 def main() -> None:
     ap = argparse.ArgumentParser(description="False-positive rate of the nightly gate, no model calls.")
-    ap.add_argument("--baseline", default=str(Path(__file__).parent / "baselines" / "agent_ref_groq.json"))
+    ap.add_argument("--baseline", default=str(Path(__file__).parent / "baselines" / "agent_ref_gpt_oss_120b.json"))
     ap.add_argument("--subset", type=int, default=8, help="the nightly's first N tasks (sorted task ids)")
     ap.add_argument("--runs", type=int, default=2)
     ap.add_argument("--draws", type=int, default=1000)
