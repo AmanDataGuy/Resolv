@@ -1,0 +1,904 @@
+{
+ "about": "# Load-test knee of POST /resolve with the fake LLM. Holds the machine, the exact commands and one summary row per run (output of loadtest/resolve.py). Read by docs/RUNBOOK.md, docs/scale_out.md and loadtest/README.md; every number they quote comes from this file.",
+ "date_utc": "2026-11-14",
+ "machine": {
+  "cpu": "Intel(R) Core(TM) i5-14450HX",
+  "logical_cores": 16,
+  "ram_gb": 22.6,
+  "os": "Linux 7.0.0-43-generic",
+  "python": "3.11.18",
+  "ledger_disk": "NVMe SSD, ext4 (data/ on the root filesystem); the tmpfs series used /tmp (RAM)",
+  "server_process": "one uvicorn worker (one event loop), load generator on the same machine"
+ },
+ "commands": {
+  "server": "LANGFUSE_PUBLIC_KEY= LANGFUSE_SECRET_KEY= RESOLV_ENV=dev RESOLV_FAKE_LLM=1 FAKE_LLM_LATENCY_S=0.8 TRUSTED_CLIENT_IP_HEADER=X-Loadtest-IP ORDER_PROOF_SECRET=loadtest-secret RESOLV_DB=data/<dir>/resolv.db RESOLV_PSP_DB=data/<dir>/psp.db RESOLV_TELEMETRY=data/<dir>/live.jsonl uvicorn resolv.api.main:app --port 8020 --log-level warning",
+  "proof": "ORDER_PROOF_SECRET=loadtest-secret python -c \"from resolv.api.auth import order_proof; print(order_proof('ORD-1187'))\"",
+  "warm_up": "one 15 s run at --rate 2 after each server start (first requests pay lazy imports); not recorded",
+  "load": "python -m loadtest.resolve --base http://localhost:8020 --order ORD-1187 --proof <code> --rate <r> --duration 60 --concurrency 400 --ip-header X-Loadtest-IP --fake-llm --out <dir>/rate<r>",
+  "profile": "py-spy record --idle --format raw -- uvicorn ... (same server), 30 s at --rate 40, code 84c5c69"
+ },
+ "notes": [
+  "Each /resolve makes two fake LLM calls of 0.8 s, so an unloaded request takes about 1.62 s.",
+  "Langfuse keys are blanked so no traces leave the machine and tracing cost is not measured.",
+  "Knee rule: the first rate where ok_per_s falls below 95% of the offered rate, /resolve p95 passes 2x its unloaded value, or /health p95 passes 100 ms.",
+  "code 84c5c69 = before the fix (step journal and trail reads run sync SQLite on the event loop); code 1c0831f = after (those calls run in asyncio.to_thread)."
+ ],
+ "profile_before_fix_rate40": {
+  "event_loop_samples": 3484,
+  "idle_waiting_for_io_pct": 60.5,
+  "inside_resolv_harness_ledger_pct": {
+   "add_step (step journal commit)": 17.6,
+   "tx (BEGIN/COMMIT)": 16.8,
+   "connect (open + PRAGMAs)": 9.1,
+   "audit.read": 4.7,
+   "ledger.steps": 1.9
+  },
+  "reading": "About two thirds of the loop's busy time was sync SQLite; the commit fsync blocks every other request."
+ },
+ "runs": [
+  {
+   "series": "before_fix_tmpfs",
+   "code": "84c5c69",
+   "ledger_disk": "tmpfs",
+   "mode": "fake-llm",
+   "rate_per_s": 2.0,
+   "duration_s": 60.0,
+   "concurrency": 400,
+   "elapsed_s": 61.11,
+   "endpoints": {
+    "health": {
+     "requests": 120,
+     "errors": 0,
+     "error_rate": 0.0,
+     "ok_per_s": 1.964,
+     "p50_s": 0.005,
+     "p95_s": 0.007,
+     "p99_s": 0.009,
+     "status_counts": {
+      "200": 120
+     }
+    },
+    "resolve": {
+     "requests": 120,
+     "errors": 0,
+     "error_rate": 0.0,
+     "ok_per_s": 1.964,
+     "p50_s": 1.61,
+     "p95_s": 1.613,
+     "p99_s": 1.615,
+     "status_counts": {
+      "200": 120
+     }
+    }
+   }
+  },
+  {
+   "series": "before_fix_tmpfs",
+   "code": "84c5c69",
+   "ledger_disk": "tmpfs",
+   "mode": "fake-llm",
+   "rate_per_s": 5.0,
+   "duration_s": 60.0,
+   "concurrency": 400,
+   "elapsed_s": 61.42,
+   "endpoints": {
+    "health": {
+     "requests": 120,
+     "errors": 0,
+     "error_rate": 0.0,
+     "ok_per_s": 1.954,
+     "p50_s": 0.004,
+     "p95_s": 0.011,
+     "p99_s": 0.013,
+     "status_counts": {
+      "200": 120
+     }
+    },
+    "resolve": {
+     "requests": 300,
+     "errors": 0,
+     "error_rate": 0.0,
+     "ok_per_s": 4.885,
+     "p50_s": 1.609,
+     "p95_s": 1.614,
+     "p99_s": 1.617,
+     "status_counts": {
+      "200": 300
+     }
+    }
+   }
+  },
+  {
+   "series": "before_fix_tmpfs",
+   "code": "84c5c69",
+   "ledger_disk": "tmpfs",
+   "mode": "fake-llm",
+   "rate_per_s": 10.0,
+   "duration_s": 60.0,
+   "concurrency": 400,
+   "elapsed_s": 61.53,
+   "endpoints": {
+    "health": {
+     "requests": 120,
+     "errors": 0,
+     "error_rate": 0.0,
+     "ok_per_s": 1.95,
+     "p50_s": 0.008,
+     "p95_s": 0.011,
+     "p99_s": 0.012,
+     "status_counts": {
+      "200": 120
+     }
+    },
+    "resolve": {
+     "requests": 600,
+     "errors": 0,
+     "error_rate": 0.0,
+     "ok_per_s": 9.752,
+     "p50_s": 1.609,
+     "p95_s": 1.614,
+     "p99_s": 1.623,
+     "status_counts": {
+      "200": 600
+     }
+    }
+   }
+  },
+  {
+   "series": "before_fix_tmpfs",
+   "code": "84c5c69",
+   "ledger_disk": "tmpfs",
+   "mode": "fake-llm",
+   "rate_per_s": 20.0,
+   "duration_s": 60.0,
+   "concurrency": 400,
+   "elapsed_s": 61.57,
+   "endpoints": {
+    "health": {
+     "requests": 120,
+     "errors": 0,
+     "error_rate": 0.0,
+     "ok_per_s": 1.949,
+     "p50_s": 0.01,
+     "p95_s": 0.014,
+     "p99_s": 0.021,
+     "status_counts": {
+      "200": 120
+     }
+    },
+    "resolve": {
+     "requests": 1200,
+     "errors": 0,
+     "error_rate": 0.0,
+     "ok_per_s": 19.489,
+     "p50_s": 1.61,
+     "p95_s": 1.616,
+     "p99_s": 1.619,
+     "status_counts": {
+      "200": 1200
+     }
+    }
+   }
+  },
+  {
+   "series": "before_fix_tmpfs",
+   "code": "84c5c69",
+   "ledger_disk": "tmpfs",
+   "mode": "fake-llm",
+   "rate_per_s": 40.0,
+   "duration_s": 60.0,
+   "concurrency": 400,
+   "elapsed_s": 61.6,
+   "endpoints": {
+    "health": {
+     "requests": 120,
+     "errors": 0,
+     "error_rate": 0.0,
+     "ok_per_s": 1.948,
+     "p50_s": 0.011,
+     "p95_s": 0.015,
+     "p99_s": 0.016,
+     "status_counts": {
+      "200": 120
+     }
+    },
+    "resolve": {
+     "requests": 2400,
+     "errors": 0,
+     "error_rate": 0.0,
+     "ok_per_s": 38.962,
+     "p50_s": 1.611,
+     "p95_s": 1.616,
+     "p99_s": 1.619,
+     "status_counts": {
+      "200": 2400
+     }
+    }
+   }
+  },
+  {
+   "series": "before_fix_tmpfs",
+   "code": "84c5c69",
+   "ledger_disk": "tmpfs",
+   "mode": "fake-llm",
+   "rate_per_s": 80.0,
+   "duration_s": 60.0,
+   "concurrency": 400,
+   "elapsed_s": 177.99,
+   "endpoints": {
+    "health": {
+     "requests": 120,
+     "errors": 0,
+     "error_rate": 0.0,
+     "ok_per_s": 0.674,
+     "p50_s": 118.127,
+     "p95_s": 142.298,
+     "p99_s": 143.208,
+     "status_counts": {
+      "200": 120
+     }
+    },
+    "resolve": {
+     "requests": 4800,
+     "errors": 0,
+     "error_rate": 0.0,
+     "ok_per_s": 26.968,
+     "p50_s": 53.396,
+     "p95_s": 115.679,
+     "p99_s": 118.389,
+     "status_counts": {
+      "200": 4800
+     }
+    }
+   }
+  },
+  {
+   "series": "before_fix_disk",
+   "code": "84c5c69",
+   "ledger_disk": "nvme",
+   "mode": "fake-llm",
+   "rate_per_s": 2.0,
+   "duration_s": 60.0,
+   "concurrency": 400,
+   "elapsed_s": 61.12,
+   "endpoints": {
+    "health": {
+     "requests": 120,
+     "errors": 0,
+     "error_rate": 0.0,
+     "ok_per_s": 1.963,
+     "p50_s": 0.005,
+     "p95_s": 0.006,
+     "p99_s": 0.007,
+     "status_counts": {
+      "200": 120
+     }
+    },
+    "resolve": {
+     "requests": 120,
+     "errors": 0,
+     "error_rate": 0.0,
+     "ok_per_s": 1.963,
+     "p50_s": 1.618,
+     "p95_s": 1.621,
+     "p99_s": 1.626,
+     "status_counts": {
+      "200": 120
+     }
+    }
+   }
+  },
+  {
+   "series": "before_fix_disk",
+   "code": "84c5c69",
+   "ledger_disk": "nvme",
+   "mode": "fake-llm",
+   "rate_per_s": 5.0,
+   "duration_s": 60.0,
+   "concurrency": 400,
+   "elapsed_s": 61.43,
+   "endpoints": {
+    "health": {
+     "requests": 120,
+     "errors": 0,
+     "error_rate": 0.0,
+     "ok_per_s": 1.953,
+     "p50_s": 0.007,
+     "p95_s": 0.12,
+     "p99_s": 1.49,
+     "status_counts": {
+      "200": 120
+     }
+    },
+    "resolve": {
+     "requests": 300,
+     "errors": 0,
+     "error_rate": 0.0,
+     "ok_per_s": 4.884,
+     "p50_s": 1.647,
+     "p95_s": 2.52,
+     "p99_s": 3.478,
+     "status_counts": {
+      "200": 300
+     }
+    }
+   }
+  },
+  {
+   "series": "before_fix_disk",
+   "code": "84c5c69",
+   "ledger_disk": "nvme",
+   "mode": "fake-llm",
+   "rate_per_s": 10.0,
+   "duration_s": 60.0,
+   "concurrency": 400,
+   "elapsed_s": 61.57,
+   "endpoints": {
+    "health": {
+     "requests": 120,
+     "errors": 0,
+     "error_rate": 0.0,
+     "ok_per_s": 1.949,
+     "p50_s": 0.013,
+     "p95_s": 0.034,
+     "p99_s": 0.231,
+     "status_counts": {
+      "200": 120
+     }
+    },
+    "resolve": {
+     "requests": 600,
+     "errors": 0,
+     "error_rate": 0.0,
+     "ok_per_s": 9.744,
+     "p50_s": 1.618,
+     "p95_s": 1.844,
+     "p99_s": 2.228,
+     "status_counts": {
+      "200": 600
+     }
+    }
+   }
+  },
+  {
+   "series": "before_fix_disk",
+   "code": "84c5c69",
+   "ledger_disk": "nvme",
+   "mode": "fake-llm",
+   "rate_per_s": 20.0,
+   "duration_s": 60.0,
+   "concurrency": 400,
+   "elapsed_s": 61.58,
+   "endpoints": {
+    "health": {
+     "requests": 120,
+     "errors": 0,
+     "error_rate": 0.0,
+     "ok_per_s": 1.949,
+     "p50_s": 0.016,
+     "p95_s": 0.036,
+     "p99_s": 0.196,
+     "status_counts": {
+      "200": 120
+     }
+    },
+    "resolve": {
+     "requests": 1200,
+     "errors": 0,
+     "error_rate": 0.0,
+     "ok_per_s": 19.487,
+     "p50_s": 1.625,
+     "p95_s": 1.763,
+     "p99_s": 2.317,
+     "status_counts": {
+      "200": 1200
+     }
+    }
+   }
+  },
+  {
+   "series": "before_fix_disk",
+   "code": "84c5c69",
+   "ledger_disk": "nvme",
+   "mode": "fake-llm",
+   "rate_per_s": 40.0,
+   "duration_s": 60.0,
+   "concurrency": 400,
+   "elapsed_s": 79.41,
+   "endpoints": {
+    "health": {
+     "requests": 120,
+     "errors": 0,
+     "error_rate": 0.0,
+     "ok_per_s": 1.511,
+     "p50_s": 27.224,
+     "p95_s": 48.597,
+     "p99_s": 50.499,
+     "status_counts": {
+      "200": 120
+     }
+    },
+    "resolve": {
+     "requests": 2400,
+     "errors": 0,
+     "error_rate": 0.0,
+     "ok_per_s": 30.225,
+     "p50_s": 10.551,
+     "p95_s": 20.513,
+     "p99_s": 21.254,
+     "status_counts": {
+      "200": 2400
+     }
+    }
+   }
+  },
+  {
+   "series": "before_fix_disk",
+   "code": "84c5c69",
+   "ledger_disk": "nvme",
+   "mode": "fake-llm",
+   "rate_per_s": 60.0,
+   "duration_s": 60.0,
+   "concurrency": 400,
+   "elapsed_s": 70.44,
+   "endpoints": {
+    "health": {
+     "requests": 120,
+     "errors": 0,
+     "error_rate": 0.0,
+     "ok_per_s": 1.704,
+     "p50_s": 0.605,
+     "p95_s": 14.53,
+     "p99_s": 16.404,
+     "status_counts": {
+      "200": 120
+     }
+    },
+    "resolve": {
+     "requests": 3600,
+     "errors": 0,
+     "error_rate": 0.0,
+     "ok_per_s": 51.111,
+     "p50_s": 2.331,
+     "p95_s": 9.552,
+     "p99_s": 10.592,
+     "status_counts": {
+      "200": 3600
+     }
+    }
+   }
+  },
+  {
+   "series": "before_fix_disk",
+   "code": "84c5c69",
+   "ledger_disk": "nvme",
+   "mode": "fake-llm",
+   "rate_per_s": 80.0,
+   "duration_s": 60.0,
+   "concurrency": 400,
+   "elapsed_s": 153.17,
+   "endpoints": {
+    "health": {
+     "requests": 120,
+     "errors": 0,
+     "error_rate": 0.0,
+     "ok_per_s": 0.783,
+     "p50_s": 92.287,
+     "p95_s": 113.888,
+     "p99_s": 115.433,
+     "status_counts": {
+      "200": 120
+     }
+    },
+    "resolve": {
+     "requests": 4800,
+     "errors": 0,
+     "error_rate": 0.0,
+     "ok_per_s": 31.337,
+     "p50_s": 44.046,
+     "p95_s": 91.013,
+     "p99_s": 93.432,
+     "status_counts": {
+      "200": 4800
+     }
+    }
+   }
+  },
+  {
+   "series": "before_fix_disk_repeat",
+   "code": "84c5c69",
+   "ledger_disk": "nvme",
+   "mode": "fake-llm",
+   "rate_per_s": 40.0,
+   "duration_s": 60.0,
+   "concurrency": 400,
+   "elapsed_s": 61.61,
+   "endpoints": {
+    "health": {
+     "requests": 120,
+     "errors": 0,
+     "error_rate": 0.0,
+     "ok_per_s": 1.948,
+     "p50_s": 0.015,
+     "p95_s": 0.157,
+     "p99_s": 0.26,
+     "status_counts": {
+      "200": 120
+     }
+    },
+    "resolve": {
+     "requests": 2400,
+     "errors": 0,
+     "error_rate": 0.0,
+     "ok_per_s": 38.957,
+     "p50_s": 1.615,
+     "p95_s": 1.689,
+     "p99_s": 1.748,
+     "status_counts": {
+      "200": 2400
+     }
+    }
+   }
+  },
+  {
+   "series": "before_fix_disk_repeat",
+   "code": "84c5c69",
+   "ledger_disk": "nvme",
+   "mode": "fake-llm",
+   "rate_per_s": 60.0,
+   "duration_s": 60.0,
+   "concurrency": 400,
+   "elapsed_s": 75.05,
+   "endpoints": {
+    "health": {
+     "requests": 120,
+     "errors": 0,
+     "error_rate": 0.0,
+     "ok_per_s": 1.599,
+     "p50_s": 1.444,
+     "p95_s": 25.886,
+     "p99_s": 27.156,
+     "status_counts": {
+      "200": 120
+     }
+    },
+    "resolve": {
+     "requests": 3600,
+     "errors": 0,
+     "error_rate": 0.0,
+     "ok_per_s": 47.971,
+     "p50_s": 3.198,
+     "p95_s": 14.521,
+     "p99_s": 15.134,
+     "status_counts": {
+      "200": 3600
+     }
+    }
+   }
+  },
+  {
+   "series": "after_fix_disk",
+   "code": "1c0831f",
+   "ledger_disk": "nvme",
+   "mode": "fake-llm",
+   "rate_per_s": 2.0,
+   "duration_s": 60.0,
+   "concurrency": 400,
+   "elapsed_s": 61.12,
+   "endpoints": {
+    "health": {
+     "requests": 120,
+     "errors": 0,
+     "error_rate": 0.0,
+     "ok_per_s": 1.963,
+     "p50_s": 0.004,
+     "p95_s": 0.005,
+     "p99_s": 0.006,
+     "status_counts": {
+      "200": 120
+     }
+    },
+    "resolve": {
+     "requests": 120,
+     "errors": 0,
+     "error_rate": 0.0,
+     "ok_per_s": 1.963,
+     "p50_s": 1.619,
+     "p95_s": 1.622,
+     "p99_s": 1.623,
+     "status_counts": {
+      "200": 120
+     }
+    }
+   }
+  },
+  {
+   "series": "after_fix_disk",
+   "code": "1c0831f",
+   "ledger_disk": "nvme",
+   "mode": "fake-llm",
+   "rate_per_s": 5.0,
+   "duration_s": 60.0,
+   "concurrency": 400,
+   "elapsed_s": 61.42,
+   "endpoints": {
+    "health": {
+     "requests": 120,
+     "errors": 0,
+     "error_rate": 0.0,
+     "ok_per_s": 1.954,
+     "p50_s": 0.004,
+     "p95_s": 0.005,
+     "p99_s": 0.005,
+     "status_counts": {
+      "200": 120
+     }
+    },
+    "resolve": {
+     "requests": 300,
+     "errors": 0,
+     "error_rate": 0.0,
+     "ok_per_s": 4.884,
+     "p50_s": 1.616,
+     "p95_s": 1.619,
+     "p99_s": 1.622,
+     "status_counts": {
+      "200": 300
+     }
+    }
+   }
+  },
+  {
+   "series": "after_fix_disk",
+   "code": "1c0831f",
+   "ledger_disk": "nvme",
+   "mode": "fake-llm",
+   "rate_per_s": 10.0,
+   "duration_s": 60.0,
+   "concurrency": 400,
+   "elapsed_s": 61.53,
+   "endpoints": {
+    "health": {
+     "requests": 120,
+     "errors": 0,
+     "error_rate": 0.0,
+     "ok_per_s": 1.95,
+     "p50_s": 0.004,
+     "p95_s": 0.005,
+     "p99_s": 0.007,
+     "status_counts": {
+      "200": 120
+     }
+    },
+    "resolve": {
+     "requests": 600,
+     "errors": 0,
+     "error_rate": 0.0,
+     "ok_per_s": 9.751,
+     "p50_s": 1.616,
+     "p95_s": 1.618,
+     "p99_s": 1.621,
+     "status_counts": {
+      "200": 600
+     }
+    }
+   }
+  },
+  {
+   "series": "after_fix_disk",
+   "code": "1c0831f",
+   "ledger_disk": "nvme",
+   "mode": "fake-llm",
+   "rate_per_s": 20.0,
+   "duration_s": 60.0,
+   "concurrency": 400,
+   "elapsed_s": 61.58,
+   "endpoints": {
+    "health": {
+     "requests": 120,
+     "errors": 0,
+     "error_rate": 0.0,
+     "ok_per_s": 1.949,
+     "p50_s": 0.006,
+     "p95_s": 0.008,
+     "p99_s": 0.01,
+     "status_counts": {
+      "200": 120
+     }
+    },
+    "resolve": {
+     "requests": 1200,
+     "errors": 0,
+     "error_rate": 0.0,
+     "ok_per_s": 19.486,
+     "p50_s": 1.618,
+     "p95_s": 1.641,
+     "p99_s": 1.693,
+     "status_counts": {
+      "200": 1200
+     }
+    }
+   }
+  },
+  {
+   "series": "after_fix_disk",
+   "code": "1c0831f",
+   "ledger_disk": "nvme",
+   "mode": "fake-llm",
+   "rate_per_s": 40.0,
+   "duration_s": 60.0,
+   "concurrency": 400,
+   "elapsed_s": 61.61,
+   "endpoints": {
+    "health": {
+     "requests": 120,
+     "errors": 0,
+     "error_rate": 0.0,
+     "ok_per_s": 1.948,
+     "p50_s": 0.006,
+     "p95_s": 0.009,
+     "p99_s": 0.01,
+     "status_counts": {
+      "200": 120
+     }
+    },
+    "resolve": {
+     "requests": 2400,
+     "errors": 0,
+     "error_rate": 0.0,
+     "ok_per_s": 38.957,
+     "p50_s": 1.617,
+     "p95_s": 1.644,
+     "p99_s": 1.744,
+     "status_counts": {
+      "200": 2400
+     }
+    }
+   }
+  },
+  {
+   "series": "after_fix_disk",
+   "code": "1c0831f",
+   "ledger_disk": "nvme",
+   "mode": "fake-llm",
+   "rate_per_s": 60.0,
+   "duration_s": 60.0,
+   "concurrency": 400,
+   "elapsed_s": 61.61,
+   "endpoints": {
+    "health": {
+     "requests": 120,
+     "errors": 0,
+     "error_rate": 0.0,
+     "ok_per_s": 1.948,
+     "p50_s": 0.01,
+     "p95_s": 0.168,
+     "p99_s": 0.231,
+     "status_counts": {
+      "200": 120
+     }
+    },
+    "resolve": {
+     "requests": 3600,
+     "errors": 0,
+     "error_rate": 0.0,
+     "ok_per_s": 58.428,
+     "p50_s": 1.641,
+     "p95_s": 1.829,
+     "p99_s": 2.022,
+     "status_counts": {
+      "200": 3600
+     }
+    }
+   }
+  },
+  {
+   "series": "after_fix_disk",
+   "code": "1c0831f",
+   "ledger_disk": "nvme",
+   "mode": "fake-llm",
+   "rate_per_s": 80.0,
+   "duration_s": 60.0,
+   "concurrency": 400,
+   "elapsed_s": 141.62,
+   "endpoints": {
+    "health": {
+     "requests": 120,
+     "errors": 0,
+     "error_rate": 0.0,
+     "ok_per_s": 0.847,
+     "p50_s": 82.577,
+     "p95_s": 104.774,
+     "p99_s": 106.175,
+     "status_counts": {
+      "200": 120
+     }
+    },
+    "resolve": {
+     "requests": 4800,
+     "errors": 0,
+     "error_rate": 0.0,
+     "ok_per_s": 33.894,
+     "p50_s": 38.922,
+     "p95_s": 79.774,
+     "p99_s": 81.429,
+     "status_counts": {
+      "200": 4800
+     }
+    }
+   }
+  },
+  {
+   "series": "after_fix_disk_repeat",
+   "code": "1c0831f",
+   "ledger_disk": "nvme",
+   "mode": "fake-llm",
+   "rate_per_s": 40.0,
+   "duration_s": 60.0,
+   "concurrency": 400,
+   "elapsed_s": 61.6,
+   "endpoints": {
+    "health": {
+     "requests": 120,
+     "errors": 0,
+     "error_rate": 0.0,
+     "ok_per_s": 1.948,
+     "p50_s": 0.006,
+     "p95_s": 0.009,
+     "p99_s": 0.012,
+     "status_counts": {
+      "200": 120
+     }
+    },
+    "resolve": {
+     "requests": 2400,
+     "errors": 0,
+     "error_rate": 0.0,
+     "ok_per_s": 38.958,
+     "p50_s": 1.616,
+     "p95_s": 1.619,
+     "p99_s": 1.624,
+     "status_counts": {
+      "200": 2400
+     }
+    }
+   }
+  },
+  {
+   "series": "after_fix_disk_repeat",
+   "code": "1c0831f",
+   "ledger_disk": "nvme",
+   "mode": "fake-llm",
+   "rate_per_s": 60.0,
+   "duration_s": 60.0,
+   "concurrency": 400,
+   "elapsed_s": 61.61,
+   "endpoints": {
+    "health": {
+     "requests": 120,
+     "errors": 0,
+     "error_rate": 0.0,
+     "ok_per_s": 1.948,
+     "p50_s": 0.006,
+     "p95_s": 0.179,
+     "p99_s": 0.236,
+     "status_counts": {
+      "200": 120
+     }
+    },
+    "resolve": {
+     "requests": 3600,
+     "errors": 0,
+     "error_rate": 0.0,
+     "ok_per_s": 58.433,
+     "p50_s": 1.616,
+     "p95_s": 1.812,
+     "p99_s": 1.921,
+     "status_counts": {
+      "200": 3600
+     }
+    }
+   }
+  }
+ ]
+}
