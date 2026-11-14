@@ -22,3 +22,7 @@ jobs:
         run: ruff check .
       - name: Tests
         run: pytest -q -p no:cacheprovider
+      # Keyless: the nightly gate's false-positive rate, resampled from the reference rows (no model calls).
+      # Point it at evals/baselines/agent_ref_gpt_oss_120b.json once the full sweep is pinned.
+      - name: Eval gate false-positive rate
+        run: python -m evals.gate --baseline evals/results/ref_gpt_oss_120b.jsonl --subset 8 --runs 2 --draws 1000
