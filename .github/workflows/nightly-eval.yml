@@ -42,14 +42,14 @@ jobs:
           cache: pip
       - run: pip install -r requirements-eval.txt
       - name: Extractor regression gate
-        if: hashFiles('evals/baselines/extractor_ref_groq.json') != ''
-        run: python -m evals.extractor --baseline evals/baselines/extractor_ref_groq.json
+        if: hashFiles('evals/baselines/extractor_ref_gpt_oss_120b.json') != ''
+        run: python -m evals.extractor --baseline evals/baselines/extractor_ref_gpt_oss_120b.json
       - name: Agent smoke gate
-        if: hashFiles('evals/baselines/agent_ref_groq.json') != ''
+        if: hashFiles('evals/baselines/agent_ref_gpt_oss_120b.json') != ''
         run: |
           set +e
           python -m evals.runner --subset 8 --n 2 --k 1 --out nightly.jsonl \
-            --gate evals/baselines/agent_ref_groq.json
+            --gate evals/baselines/agent_ref_gpt_oss_120b.json
           code=$?
           if [ "$code" = "78" ]; then echo "::warning::gate inconclusive"; exit 0; fi
           exit $code
