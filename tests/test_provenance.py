@@ -53,6 +53,12 @@ def test_provider_of():
     assert provenance.provider_of("gemini/gemini-3.6-flash") == "gemini"
 
 
+# the same weights on two hosts compare equal; different weights do not
+def test_weights_of():
+    assert provenance.weights_of("groq/openai/gpt-oss-120b") == provenance.weights_of("openrouter/openai/gpt-oss-120b")
+    assert provenance.weights_of("groq/openai/gpt-oss-120b") != provenance.weights_of("gemini/gemini-3.6-flash")
+
+
 # exceptions are classified so infra failures can be separated from agent failures
 @pytest.mark.parametrize("exc, kind", [(Exception("429 Too Many Requests"), "rate_limit"),
                                        (Exception("RESOURCE_EXHAUSTED: quota exceeded"), "quota"),
