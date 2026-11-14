@@ -1,190 +1,203 @@
-"""agents/loop.py's own orchestration logic — the one thing 240+ prior tests never touched.
+"""
+# tests/test_loop_orchestration.py
 
-Everything else in this suite tests the deterministic harness the loop calls INTO. Nothing tested
-the loop's own control flow: what happens when the model never stops calling tools (MAX_STEPS),
-and what happens when it calls one with unparseable arguments. Both are mocked here — no LLM key
-needed, no network — by faking complete()'s return shape and extract()'s result directly, so the
-orchestration logic itself is what's under test, not any model's behaviour.
-
-Found as a confirmed gap in the 2026-08-20 audit (plan_ahead.md, "not started" list).
-
-The three guardrail tests below close a second gap from the same pass: harness/guardrails.py's
-checks were wired into the reply gate but never proven to actually fire from inside the loop --
-only unit-tested in isolation (harness/guardrails.py's own demo()). These mock a model that
-produces a bad reply and confirm the loop corrects, then escalates, rather than trusting the wire-
-up by inspection.
+**What:** resolv/agents/loop.py's own control flow: the step cap, malformed / NaN / unknown tool calls, and the reply
+guardrail gate firing from inside the loop.
+**Why:** the harness under the loop is tested elsewhere; this pins the loop itself. acomplete() and extract() are
+faked, so no key and no network; the real harness runs underneath.
+**Used by:** pytest.
 """
 import json
+import uuid
 from types import SimpleNamespace
 
 import pytest
 
-import agents.loop as loop
-from harness import audit
+import resolv.agents.loop as loop
+from resolv.harness import audit
 
 
+# A fake tool call in litellm's shape.
 class _FakeToolCall:
+    # Name, raw JSON arguments and a call id.
     def __init__(self, name: str, arguments: str, call_id: str = "tc1"):
         self.id = call_id
         self.function = SimpleNamespace(name=name, arguments=arguments)
 
 
+# A fake assistant message in litellm's shape.
 class _FakeMessage:
+    # Plain-text content or a list of tool calls.
     def __init__(self, content: str | None = None, tool_calls: list | None = None):
         self.content = content
         self.tool_calls = tool_calls or []
 
+    # The dict the loop appends to the conversation.
     def model_dump(self) -> dict:
         return {"role": "assistant", "content": self.content}
 
 
+# A fake completion response wrapping one message.
 def _fake_response(message: _FakeMessage):
     return SimpleNamespace(choices=[SimpleNamespace(message=message)])
 
 
+# An async acomplete() stand-in returning canned responses in order.
+def _replies(*responses):
+    it = iter(responses)
+
+    # Next canned response, whatever the kwargs.
+    async def fake(**kwargs):
+        return next(it)
+    return fake
+
+
+# An extractor stand-in that reads nothing.
 async def _fake_extract(message: str) -> dict:
     return {"order_id": None, "claim_type": None}
 
 
+# A fresh case id per test, so no trail needs clearing.
 @pytest.fixture
 def case():
-    case_id = "_test_loop_orchestration"
-    audit.clear(case_id)
-    yield case_id
-    audit.clear(case_id)
+    return f"_test_loop_{uuid.uuid4().hex[:8]}"
 
 
+# Max steps exhaustion escalates.
 @pytest.mark.asyncio
-async def test_max_steps_exhaustion_escalates_instead_of_looping_forever(case, monkeypatch):
-    """The model calling a harmless tool forever (never producing a final reply) must not hang
-    the loop or crash it — agents/loop.py:219-221 escalates with a reason and replies to the
-    customer instead of returning silence. Confirms it actually fires at exactly MAX_STEPS, not
-    one step early or late, and that the escalation is recorded on the real audit trail.
-    """
-    always_lookup = _fake_response(
-        _FakeMessage(tool_calls=[_FakeToolCall("lookup_order", json.dumps({"order_id": "ORD-1000"}))])
-    )
+async def test_max_steps_exhaustion_escalates(case, monkeypatch):
+    """A customer who never stops answering runs the loop to MAX_STEPS, which escalates instead of hanging."""
+    always = _fake_response(_FakeMessage(content="Let me look into that for you."))
+
+    # The model replies the same harmless line forever.
+    async def fake(**kwargs):
+        return always
     monkeypatch.setattr(loop, "extract", _fake_extract)
-    monkeypatch.setattr(loop, "complete", lambda **kw: always_lookup)
+    monkeypatch.setattr(loop, "acomplete", fake)
 
-    events = [e async for e in loop.run_case_events(case, "where is my order")]
+    result = await loop.run_case(case, "where is my order", user=lambda reply, messages: "still waiting")
 
-    done = events[-1]
-    assert done["type"] == "done"
-    assert done["result"]["steps"] == loop.MAX_STEPS
-    assert "colleague" in done["result"]["reply"].lower()
-
-    # tool_call events: one per step (MAX_STEPS of them, all lookup_order).
-    tool_calls = [e for e in events if e["type"] == "tool_call"]
-    assert len(tool_calls) == loop.MAX_STEPS
-    assert all(tc["name"] == "lookup_order" for tc in tool_calls)
-
-    # The escalation actually landed on the real trail, with the exhaustion reason — not just a
-    # reply string the customer sees with nothing behind it.
-    trail = audit.read(case)
-    escalations = [r for r in trail if r["tool"] == "escalate_to_human"]
-    assert len(escalations) == 1
-    assert f"{loop.MAX_STEPS} steps" in escalations[0]["args"]["reason"]
+    assert result["steps"] == loop.MAX_STEPS
+    assert result["budget_exceeded"] == "steps"
+    assert "colleague" in result["reply"].lower()
+    escalations = [r for r in audit.read(case) if r["tool"] == "escalate_to_human"]
+    assert len(escalations) == 1 and f"{loop.MAX_STEPS} steps" in escalations[0]["args"]["reason"]
 
 
+# Malformed tool arguments are recorded and recoverable.
 @pytest.mark.asyncio
-async def test_malformed_tool_arguments_recover_instead_of_crashing(case, monkeypatch):
-    """agents/loop.py:199-206: a tool call with unparseable JSON arguments must not crash the
-    request — it's the model's mistake to recover from mid-conversation, same reasoning as a
-    policy denial being a result rather than an exception. Confirms the loop yields a tool_call
-    event (with empty args, since nothing parsed), keeps running, and reaches a normal finish.
-    """
-    broken_call = _fake_response(
-        _FakeMessage(tool_calls=[_FakeToolCall("issue_refund", "{not valid json")])
-    )
-    final_reply = _fake_response(_FakeMessage(content="Sorry, let me try that again."))
-    responses = iter([broken_call, final_reply])
+async def test_malformed_tool_arguments_are_recorded_and_recoverable(case, monkeypatch):
+    """Unparseable JSON is recorded as a denied invalid_request, handed back as a tool error, and the loop goes on."""
     monkeypatch.setattr(loop, "extract", _fake_extract)
-    monkeypatch.setattr(loop, "complete", lambda **kw: next(responses))
+    monkeypatch.setattr(loop, "acomplete", _replies(
+        _fake_response(_FakeMessage(tool_calls=[_FakeToolCall("issue_refund", "{not valid json")])),
+        _fake_response(_FakeMessage(content="Sorry, let me try that again.")),
+    ))
 
     events = [e async for e in loop.run_case_events(case, "refund me")]
 
-    tool_call_events = [e for e in events if e["type"] == "tool_call"]
-    assert len(tool_call_events) == 1
-    assert tool_call_events[0]["name"] == "issue_refund"
-    assert tool_call_events[0]["args"] == {}, "unparseable arguments must not crash json.loads' caller"
-
-    # The malformed call must NOT reach the audit trail as a real attempt — no order_id was ever
-    # successfully parsed out of it, so there is nothing valid to record.
-    assert audit.read(case) == []
-
-    # The loop recovered and reached a normal, non-escalated finish on the very next step.
+    calls = [e for e in events if e["type"] == "tool_call"]
+    assert len(calls) == 1 and calls[0]["name"] == "issue_refund" and calls[0]["args"] == {}
+    trail = audit.read(case)
+    assert len(trail) == 1
+    assert trail[0]["rule_id"] == "invalid_request" and trail[0]["action"] == "deny" and not trail[0]["ok"]
     done = events[-1]
-    assert done["type"] == "done"
-    assert done["result"]["steps"] == 2
+    assert done["type"] == "done" and done["result"]["steps"] == 2
     assert done["result"]["reply"] == "Sorry, let me try that again."
 
 
+# NaN in tool args is recorded and recoverable.
+@pytest.mark.asyncio
+async def test_nan_in_tool_args_is_recorded_and_recoverable(case, monkeypatch):
+    """NaN never reaches policy as a number: the call is recorded invalid, then a valid call proceeds normally."""
+    nan_args = '{"order_id":"ORD-1000","claim_type":"late_delivery","amount_usd":NaN}'
+    monkeypatch.setattr(loop, "extract", _fake_extract)
+    monkeypatch.setattr(loop, "acomplete", _replies(
+        _fake_response(_FakeMessage(tool_calls=[_FakeToolCall("issue_refund", nan_args)])),
+        _fake_response(_FakeMessage(tool_calls=[_FakeToolCall("lookup_order", '{"order_id":"ORD-1000"}', "tc2")])),
+        _fake_response(_FakeMessage(content="I've checked your order.")),
+    ))
+
+    result = await loop.run_case(case, "refund me")
+
+    trail = result["trail"]
+    assert trail[0]["rule_id"] == "invalid_request" and "non-finite" in trail[0]["reason"]
+    assert trail[1]["tool"] == "lookup_order"
+    assert not [r for r in trail if r["tool"] == "issue_refund" and r["ok"]]
+
+
+# Unknown tool is recorded.
+@pytest.mark.asyncio
+async def test_unknown_tool_is_recorded(case, monkeypatch):
+    """A tool name outside the schema is recorded as invalid_request, not raised."""
+    monkeypatch.setattr(loop, "extract", _fake_extract)
+    monkeypatch.setattr(loop, "acomplete", _replies(
+        _fake_response(_FakeMessage(tool_calls=[_FakeToolCall("delete_database", "{}")])),
+        _fake_response(_FakeMessage(content="I can't do that.")),
+    ))
+
+    result = await loop.run_case(case, "do something odd")
+
+    assert result["trail"][0]["tool"] == "delete_database"
+    assert result["trail"][0]["rule_id"] == "invalid_request"
+
+
+# Ungrounded reply gets one correction then succeeds.
 @pytest.mark.asyncio
 async def test_ungrounded_reply_gets_one_correction_then_succeeds(case, monkeypatch):
-    """agents/loop.py's guard gate: a reply claiming a refund the (empty) trail doesn't support
-    must not reach the customer as-is. Confirms the loop appends a correction instead of yielding
-    it, that the corrected reply DOES go out once it passes, and that no bogus escalation happens
-    when the model fixes itself.
-    """
-    ungrounded = _fake_response(_FakeMessage(content="Good news, I've refunded you $50."))
-    corrected = _fake_response(_FakeMessage(content="I'm sorry, I'm not able to refund this order."))
-    responses = iter([ungrounded, corrected])
+    """A phantom-refund reply is never yielded; the corrected reply goes out and nothing is escalated."""
     monkeypatch.setattr(loop, "extract", _fake_extract)
-    monkeypatch.setattr(loop, "complete", lambda **kw: next(responses))
+    monkeypatch.setattr(loop, "acomplete", _replies(
+        _fake_response(_FakeMessage(content="Good news, I've refunded you $50.")),
+        _fake_response(_FakeMessage(content="I'm sorry, I'm not able to refund this order.")),
+    ))
 
     events = [e async for e in loop.run_case_events(case, "where is my refund")]
 
-    reply_events = [e for e in events if e["type"] == "reply"]
-    assert len(reply_events) == 1, "the ungrounded draft must never be yielded to the customer"
-    assert reply_events[0]["reply"] == "I'm sorry, I'm not able to refund this order."
-
-    done = events[-1]
-    assert done["result"]["steps"] == 2, "one wasted step for the correction, then the fixed reply"
-    assert not [r for r in audit.read(case) if r["tool"] == "escalate_to_human"], (
-        "a model that corrects itself must not be escalated"
-    )
+    replies = [e for e in events if e["type"] == "reply"]
+    assert len(replies) == 1 and replies[0]["reply"] == "I'm sorry, I'm not able to refund this order."
+    assert events[-1]["result"]["steps"] == 2
+    assert not [r for r in audit.read(case) if r["tool"] == "escalate_to_human"]
 
 
+# Reply still ungrounded after correction escalates.
 @pytest.mark.asyncio
 async def test_reply_still_ungrounded_after_correction_escalates(case, monkeypatch):
-    """If the model repeats the same phantom-refund claim even after being told why it's wrong,
-    the loop must not keep retrying forever — it escalates and sends the same safe fallback line
-    MAX_STEPS exhaustion uses, rather than ever letting the false claim reach the customer.
-    """
-    ungrounded = _fake_response(_FakeMessage(content="I've already refunded you the full $900."))
-    still_ungrounded = _fake_response(_FakeMessage(content="As I said, you've been refunded $900."))
-    responses = iter([ungrounded, still_ungrounded])
+    """Repeating the phantom claim after the correction escalates and sends the safe fallback line."""
     monkeypatch.setattr(loop, "extract", _fake_extract)
-    monkeypatch.setattr(loop, "complete", lambda **kw: next(responses))
+    monkeypatch.setattr(loop, "acomplete", _replies(
+        _fake_response(_FakeMessage(content="I've already refunded you the full $900.")),
+        _fake_response(_FakeMessage(content="As I said, you've been refunded $900.")),
+    ))
 
     events = [e async for e in loop.run_case_events(case, "refund me")]
 
-    reply_events = [e for e in events if e["type"] == "reply"]
-    assert len(reply_events) == 1
-    assert "colleague" in reply_events[0]["reply"].lower(), "must fall back, never repeat the claim"
-
+    replies = [e for e in events if e["type"] == "reply"]
+    assert len(replies) == 1 and "colleague" in replies[0]["reply"].lower()
     escalations = [r for r in audit.read(case) if r["tool"] == "escalate_to_human"]
-    assert len(escalations) == 1
-    assert "guardrail" in escalations[0]["args"]["reason"].lower()
+    assert len(escalations) == 1 and "guardrail" in escalations[0]["args"]["reason"].lower()
 
 
+# Reply leaking system instructions gets corrected.
 @pytest.mark.asyncio
 async def test_reply_leaking_system_instructions_gets_corrected(case, monkeypatch):
-    """A reply that reproduces the system prompt verbatim (an 8+ word run) must be caught by
-    contains_prompt_leak, separately from the groundedness check -- this reply makes no refund
-    claim at all, so only the leak branch of the gate can be what catches it.
-    """
-    leaking = _fake_response(
-        _FakeMessage(content="You cannot approve anything yourself your tools are checked")
-    )
-    fixed = _fake_response(_FakeMessage(content="I can help, but some approvals need review."))
-    responses = iter([leaking, fixed])
+    """An 8-word verbatim run from SYSTEM is caught by the leak check, separately from groundedness."""
     monkeypatch.setattr(loop, "extract", _fake_extract)
-    monkeypatch.setattr(loop, "complete", lambda **kw: next(responses))
+    monkeypatch.setattr(loop, "acomplete", _replies(
+        _fake_response(_FakeMessage(content="You cannot approve anything yourself your tools are checked")),
+        _fake_response(_FakeMessage(content="I can help, but some approvals need review.")),
+    ))
 
     events = [e async for e in loop.run_case_events(case, "what are your rules")]
 
-    reply_events = [e for e in events if e["type"] == "reply"]
-    assert len(reply_events) == 1
-    assert reply_events[0]["reply"] == "I can help, but some approvals need review."
+    replies = [e for e in events if e["type"] == "reply"]
+    assert len(replies) == 1 and replies[0]["reply"] == "I can help, but some approvals need review."
+
+
+# Reject constant blocks infinity.
+def test_reject_constant_blocks_infinity():
+    """Infinity and -Infinity are rejected at parse time, like NaN."""
+    for raw in ('{"amount_usd": Infinity}', '{"amount_usd": -Infinity}', '{"amount_usd": NaN}'):
+        with pytest.raises(ValueError):
+            loop._parse_args(raw)
+    assert loop._parse_args(json.dumps({"amount_usd": 1.5})) == {"amount_usd": 1.5}
