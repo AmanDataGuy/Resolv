@@ -226,23 +226,27 @@ __marimo__/
 #   data/cache/     resumable generation caches
 data/*
 !data/db/
+!data/labels/
+!data/datasets/
+data/datasets/*
+!data/datasets/complaint_cases.json
 
 # Resolv local-only docs — personal study notes and the original planning spec.
 # README.md and eval_report.md are the public-facing sources of truth; these stay
 # local, never pushed. (OFFLINE_EVAL_NOTES.md, ONLINE_EVAL_NOTES.md, the old
 # EVAL_REPORT.md, CHANGES_REPORT.md, and plan_ahead.md were consolidated into
 # eval_report.md (pushed) and study/eval.md (local) and removed.)
-notes.md
+/notes.md
 resolv.md
 finetuning_report.md
-INTERVIEW_QA.md
-SESSION_CHANGES.md
+/INTERVIEW_QA.md
+/SESSION_CHANGES.md
 
 # Personal study material — long-form learning notes for this project. Local only,
 # never pushed. The fine-tuning report now lives inside study/ as well.
 study/
 
-# DeepEval's own local cache/test-run scratch files (eval/quality.py) — regenerated every run.
+# DeepEval's own local cache/test-run scratch files (evals/quality.py) — regenerated every run.
 .deepeval/
 
 # Resolv fine-tune artifacts — LoRA adapters, downloaded model zips, and training
@@ -269,3 +273,8 @@ outputs/
 # Eval/generation logs written to repo root (*.log is also covered above under the
 # Django block, listed here too for clarity).
 gen_*.log
+
+# Local planning docs and history, never committed
+BUILD_PLAN.md
+AUDIT.md
+docs/history/
