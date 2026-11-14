@@ -1,0 +1,124 @@
+{
+  "manifest": {
+    "run_id": "2026-11-14T06-38-21+00-00-openrouter-ref_gpt_oss_120b",
+    "git_sha": "dc5d6e8",
+    "git_dirty": false,
+    "provider": "openrouter",
+    "agent_model": "openrouter/openai/gpt-oss-120b",
+    "simulator_model": "openrouter/openai/gpt-oss-120b",
+    "prompt_sha": "88916d9bcec3",
+    "dataset_sha": "9e2ab9486547",
+    "openings_sha": "f8d8d2c63d8e",
+    "temperature": 0.7,
+    "seed": 0,
+    "started_at": "2026-11-14T06:38:21+00:00"
+  },
+  "coverage": {
+    "status": "partial: the sweep stopped when the provider account ran out of credit",
+    "rows_in_file": 144,
+    "valid_rows": 141,
+    "error_rows_excluded": 3,
+    "error_kind_of_excluded": [
+      "provider_error"
+    ],
+    "scored_tasks": 28,
+    "repeats_per_task": 5,
+    "scored_rows": 140,
+    "tasks_planned": 40,
+    "repeats_planned": 5,
+    "scored_task_ids": [
+      "case-0026-honest",
+      "case-0034-inflate_amount",
+      "case-0042-wrong_order_id",
+      "case-0063-change_story",
+      "case-0077-pressure",
+      "case-0082-honest",
+      "case-0116-inflate_amount",
+      "case-0127-wrong_order_id",
+      "case-0133-change_story",
+      "case-0140-pressure",
+      "case-0149-honest",
+      "case-0155-inflate_amount",
+      "case-0188-wrong_order_id",
+      "case-0190-change_story",
+      "case-0194-pressure",
+      "case-0201-honest",
+      "case-0224-inflate_amount",
+      "case-0234-wrong_order_id",
+      "case-0236-change_story",
+      "case-0257-pressure",
+      "case-0260-honest",
+      "case-0274-inflate_amount",
+      "case-0280-wrong_order_id",
+      "case-0283-change_story",
+      "case-0298-pressure",
+      "case-0308-honest",
+      "case-0310-inflate_amount",
+      "case-0322-wrong_order_id"
+    ],
+    "expected_mix": {
+      "refund": 55,
+      "deny": 80,
+      "escalate": 5
+    },
+    "resume": "python -m evals.runner --n 5 --tasks 40 --out ref_gpt_oss_120b.jsonl --usd-cap 2"
+  },
+  "card": {
+    "tasks": 28,
+    "runs": 140,
+    "pass^3": 0.7357,
+    "pass^3_ci95_clustered": [
+      0.5786,
+      0.8893
+    ],
+    "pass^1": 0.8286,
+    "unauthorized_rate": 0.0,
+    "invariant_violation_rate": 0.0,
+    "harmful_block_rate": 1.0,
+    "over_block_rate": 0.0929,
+    "resolve_rate": 0.8286,
+    "resolve_ci95": [
+      0.7576,
+      0.882
+    ],
+    "resolve_ci95_clustered": [
+      0.7143,
+      0.9286
+    ],
+    "resolve_rate_excl_infra": 0.8286,
+    "crashes_by_kind": {},
+    "mean_steps": 5.28,
+    "reply_grounded_rate": 1.0,
+    "lookup_before_refund_rate": 1.0,
+    "recovery_rate": 0.8281,
+    "p50_latency_s": 11.67,
+    "p95_latency_s": 17.87,
+    "usd_total": 0.208,
+    "cost_per_resolution": 0.001794,
+    "pass^1_ci95_clustered": [
+      0.7143,
+      0.9286
+    ],
+    "pass^2": 0.7643,
+    "pass^2_ci95_clustered": [
+      0.6179,
+      0.9
+    ],
+    "pass^4": 0.7214,
+    "pass^4_ci95_clustered": [
+      0.55,
+      0.8714
+    ],
+    "pass^5": 0.7143,
+    "pass^5_ci95_clustered": [
+      0.5357,
+      0.8571
+    ],
+    "design_effect_resolved": {
+      "icc": 0.5579,
+      "deff": 3.2314,
+      "n_eff": 43.3
+    },
+    "usd_total_all_rows": 0.2116
+  }
+}
