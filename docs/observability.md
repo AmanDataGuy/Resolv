@@ -17,7 +17,7 @@ otherwise.
 
 ```
 invoke_agent resolv                      (one per resolution, root)
-├── chat <extractor model>               (json / legacy_line extractor; the adk backend emits ADK's own spans here)
+├── chat <extractor model>               (json / legacy_line extractor)
 ├── chat <agent model>                   (one per loop step)
 ├── execute_tool lookup_order
 ├── chat <agent model>

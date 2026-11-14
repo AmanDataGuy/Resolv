@@ -37,6 +37,8 @@ vLLM flags go in `VLLM_EXTRA` (e.g. `--no-enable-prefix-caching`); if startup OO
 `--enforce-eager` or lower `--gpu-memory-utilization`. Check a server with `curl localhost:8001/v1/models`.
 
 ## Measuring the extractor
+The extractor backend changed from ADK to json on 2026-11-14; numbers before that date are from the ADK backend.
+
 Every arm is scored on the 92 held-out cases (`evals.extractor.load_cases("test")`). Scorecards go to
 `inference/results/extractor/serve_<label>.json`.
 

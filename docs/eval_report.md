@@ -156,6 +156,8 @@ measured with the new design.
 **File:** `evals/extractor.py` · **Pinned baseline:** `evals/baselines/extractor.json` (held-out 20%
 split, n=92, Gemini 3.5 Flash)
 
+The extractor backend changed from ADK to json on 2026-11-14; numbers before that date are from the ADK backend.
+
 | metric | value |
 |---|---|
 | both order + claim correct | **0.9783** |
@@ -333,8 +335,8 @@ honest treatment: no single rate is stated (it depends entirely on which model i
 **A related fix made this session:** `resolv/agents/llm.py`'s token counter previously only
 tracked the litellm-based tool-calling loop — the extractor's separate ADK call was invisible to
 every cost estimate in this project, including the extractor baseline's `usd_total: 0.0` in section
-3 (that zero is a measurement artifact, not a free extractor call). This is now fixed: usage
-metadata from the ADK event stream feeds the same counter `complete()` already uses, so cost
+3 (that zero is a measurement artifact, not a free extractor call). This is now fixed: the
+extractor's json call goes through the same `acomplete()` meter as the agent loop, so cost
 numbers from this point forward include the extractor's real token spend.
 
 ### 5.4 Application quality — reply tone
