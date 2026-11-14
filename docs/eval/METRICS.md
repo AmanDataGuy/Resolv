@@ -63,14 +63,21 @@ On the first 8 tasks × n=2 against the same tasks in the same-model baseline:
 1. any unauthorized or invariant violation → fail;
 2. more than 25% of runs with `error_kind` quota/rate_limit → inconclusive (exit 78);
 3. pass^1 paired diff ≤ −0.25 **and** paired-cluster 95% upper bound < 0 → fail.
-False-positive rate of rule 3: not yet measured (`python -m evals.gate --fpr --baseline <ref>`; target ≤ 5%).
+False-positive rate of the gate: **0.0** (0 of 1,000 pseudo-nightlies, 8 tasks × 2 runs resampled from the
+`gpt-oss-120b` reference rows; target ≤ 5%). Measured 2026-11-14 with
+`python -m evals.gate --baseline evals/results/ref_gpt_oss_120b.jsonl --subset 8 --runs 2 --draws 1000`; CI runs the
+same command on every push and prints the number. The 8 tasks are complete (5 runs each) even though the reference
+sweep itself is partial. Limit: the pseudo-nightlies are drawn from the same rows they are compared with, so this
+measures the rule's noise floor, not drift between days.
 
 ## Design effect
 
 Runs of one task are correlated. `DEFF = 1 + (m − 1)·ICC`, `n_eff = N / DEFF`, with ICC from the one-way ANOVA
 estimator (`evals/metrics.py::design_effect`). With m = 5 runs per task and any positive ICC, 200 runs carry the
-information of fewer than 200 independent samples. ICC and n_eff for the reference sweeps: not yet measured
-(`python -m evals.metrics --rows <rows>` prints them).
+information of fewer than 200 independent samples. `gpt-oss-120b` reference (partial, 28 complete tasks × 5 = 140
+runs): ICC **0.558**, DEFF **3.23**, n_eff **43.3** (`evals/results/ref_gpt_oss_120b_partial_card.json`,
+`card.design_effect_resolved`). 140 runs carry about as much information as 43 independent ones, which is why
+every CI here is clustered by task.
 
 ## Power
 
