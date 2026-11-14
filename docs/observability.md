@@ -1,7 +1,7 @@
 # Span schema
 
-One vendor-neutral span schema, shared with the other portfolio projects. Same spans everywhere, different
-backend: Langfuse here, LangSmith in RetailGraph, Phoenix + Logfire in WealthOS.
+One vendor-neutral span schema (OpenTelemetry names), sent to Langfuse when its keys are set and a no-op
+otherwise.
 
 ## Semantic conventions
 
