@@ -5,7 +5,32 @@
 slow server shows up as queueing and errors instead of a quietly lower request rate. A light
 `GET /health` probe (2/s) runs alongside, so you can see whether the event loop stays responsive.
 
-No measured results yet. The numbers in this file are flags, not findings.
+## Measured knee
+
+Rows, machine and exact commands: `loadtest/results/fake_llm_knee.json` (fake model at 0.8 s per call, one
+uvicorn worker, a 16-thread laptop, ledger on an NVMe disk, 60 s per rate, 0 errors in every run).
+
+| Rate (req/s) | Before: ok/s, p95, `/health` p95 | After: ok/s, p95, `/health` p95 |
+|---|---|---|
+| 20 | 19.487, 1.763 s, 0.036 s | 19.486, 1.641 s, 0.008 s |
+| 40 | 30.225, 20.513 s, 48.597 s (repeat: 38.957, 1.689 s, 0.157 s) | 38.957, 1.644 s, 0.009 s (repeat: 38.958, 1.619 s, 0.009 s) |
+| 60 | 51.111, 9.552 s, 14.53 s (repeat: 47.971, 14.521 s, 25.886 s) | 58.428, 1.829 s, 0.168 s (repeat: 58.433, 1.812 s, 0.179 s) |
+| 80 | 31.337, 91.013 s, 113.888 s | 33.894, 79.774 s, 104.774 s |
+
+- **Before** (commit 84c5c69): the knee is **40 req/s**. A py-spy profile at 40 req/s put about two thirds of
+  the event loop's busy time in sync SQLite (`ledger.add_step` commits for the step journal, `connect`, `audit.read`).
+  Each commit's fsync froze every request, `/health` included. The same code with the ledger on tmpfs (no fsync
+  cost) held 40 req/s with `/health` p95 15 ms, which points at the disk write.
+- **After** (commit 1c0831f, those calls in `asyncio.to_thread`): the knee is **60 req/s**. Throughput still
+  tracks the offered rate, but `/health` p95 passes 100 ms. At 80 req/s throughput falls to 33.894 ok/s. The
+  tmpfs run collapsed at 80 req/s too, so the next limit is the CPU of one Python event loop, not the disk
+  (reasoned from those two runs, not profiled).
+- Knee rule used: the first rate where ok/s falls below 95% of the offered rate, `/resolve` p95 passes twice
+  its unloaded 1.62 s, or `/health` p95 passes 100 ms.
+- The fake model calls no tools, so these runs measure the request path, the step journal and the trail
+  reads, not refunds or the payment saga.
+- Put `RESOLV_DB` on a real disk for this test. `/tmp` is often tmpfs, which hides the fsync cost. Blank
+  `LANGFUSE_PUBLIC_KEY`/`LANGFUSE_SECRET_KEY` so no load-test traces leave the machine.
 
 ## Output
 
