@@ -1,0 +1,44 @@
+{
+  "manifest": {
+    "run_id": "2026-11-14T06-54-54+00-00-openrouter-latency",
+    "git_sha": "4c572da",
+    "git_dirty": true,
+    "provider": "openrouter",
+    "agent_model": "openrouter/openai/gpt-oss-120b",
+    "extractor_model": "openrouter/openai/gpt-oss-120b",
+    "simulator_model": "openrouter/openai/gpt-oss-120b",
+    "judge_model": "openrouter/openai/gpt-oss-120b",
+    "prompt_sha": "88916d9bcec3",
+    "dataset_sha": "9e2ab9486547",
+    "openings_sha": "f8d8d2c63d8e",
+    "temperature": 0.7,
+    "seed": 0,
+    "started_at": "2026-11-14T06:54:54+00:00"
+  },
+  "card": {
+    "samples": 25,
+    "e2e_s": {
+      "p50": 4.73,
+      "p90": 6.21,
+      "p95": 7.68,
+      "p99": 7.77
+    },
+    "e2e_p95_ci95_clustered": [
+      5.531,
+      7.769
+    ],
+    "first_action_s": {
+      "p50": 2.14,
+      "p90": 2.81,
+      "p95": 3.04,
+      "p99": 4.3
+    },
+    "first_action_p95_ci95_clustered": [
+      2.5406,
+      4.296
+    ],
+    "slo_e2e_p95_pass": true,
+    "slo_first_action_p95_pass": true,
+    "note": "small n makes p95 noisy; read the clustered CI"
+  }
+}

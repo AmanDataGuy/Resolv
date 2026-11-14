@@ -1,0 +1,33 @@
+{
+  "manifest": {
+    "run_id": "2026-11-14T06-57-02+00-00-openrouter-cost",
+    "git_sha": "4c572da",
+    "git_dirty": true,
+    "provider": "openrouter",
+    "agent_model": "openrouter/openai/gpt-oss-120b",
+    "extractor_model": "openrouter/openai/gpt-oss-120b",
+    "simulator_model": "openrouter/openai/gpt-oss-120b",
+    "judge_model": "openrouter/openai/gpt-oss-120b",
+    "prompt_sha": "88916d9bcec3",
+    "dataset_sha": "9e2ab9486547",
+    "openings_sha": "f8d8d2c63d8e",
+    "temperature": 0.7,
+    "seed": 0,
+    "started_at": "2026-11-14T06:57:02+00:00"
+  },
+  "card": {
+    "samples": 15,
+    "model": "openrouter/openai/gpt-oss-120b",
+    "avg_input_tokens": 3315,
+    "avg_output_tokens": 204,
+    "avg_usd_per_request": 0.00062,
+    "min_max_usd": [
+      0.000441,
+      0.000682
+    ],
+    "usd_per_day": 1.24,
+    "usd_per_month": 37.17,
+    "budget_pass": true,
+    "note": "list price; a free tier bills $0 but is capped by its quota"
+  }
+}

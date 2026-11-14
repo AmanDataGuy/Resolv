@@ -1,0 +1,25 @@
+{
+  "manifest": {
+    "run_id": "2026-11-14T06-58-09+00-00-openrouter-reliability",
+    "git_sha": "4c572da",
+    "git_dirty": true,
+    "provider": "openrouter",
+    "agent_model": "openrouter/openai/gpt-oss-120b",
+    "extractor_model": "openrouter/openai/gpt-oss-120b",
+    "simulator_model": "openrouter/openai/gpt-oss-120b",
+    "judge_model": "openrouter/openai/gpt-oss-120b",
+    "prompt_sha": "88916d9bcec3",
+    "dataset_sha": "9e2ab9486547",
+    "openings_sha": "f8d8d2c63d8e",
+    "temperature": 0.7,
+    "seed": 0,
+    "started_at": "2026-11-14T06:58:09+00:00"
+  },
+  "card": {
+    "requests": 25,
+    "successful": 25,
+    "success_rate": 1.0,
+    "crashes_by_kind": {},
+    "slo_pass": true
+  }
+}
