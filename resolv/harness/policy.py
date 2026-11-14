@@ -112,10 +112,17 @@ def check_refund(
 
     # --- Rule 7: large refunds need a human. ----------------------------------------------------------
     # Authority, not merit: rules 0-6 already passed. A valid approval bound to this exact call lets it through.
-    if amount_usd > AUTO_APPROVE_MAX_USD:
+    # Once a refund on this order went to a human, a smaller one may not slip under the limit while they decide.
+    waiting = any(h["tool"] == "issue_refund" and h["order_id"] == order_id
+                  and h.get("rule_id") == "over_auto_approve_limit" for h in history)
+    if amount_usd > AUTO_APPROVE_MAX_USD or waiting:
         if _approval_valid(approval, order_id, claim_type, amount_usd, caller_id):
             return _decide("allow", "approved_by_human",
                            f"${amount_usd:.2f} approved by {approval['decided_by']} ({approval.get('id')}).")
+        if amount_usd <= AUTO_APPROVE_MAX_USD:
+            return _decide("escalate", "over_auto_approve_limit",
+                           f"A larger refund on {order_id} is already waiting for a human; a smaller one cannot "
+                           "skip that review.")
         return _decide("escalate", "over_auto_approve_limit",
                        f"${amount_usd:.2f} is over the ${AUTO_APPROVE_MAX_USD:.2f} auto-approve limit.")
 
