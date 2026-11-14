@@ -278,3 +278,6 @@ gen_*.log
 BUILD_PLAN.md
 AUDIT.md
 docs/history/
+
+# Transcript dumps for error analysis (scripts/dump_transcripts.py); they only repeat committed rows
+evals/error_analysis/transcripts/
