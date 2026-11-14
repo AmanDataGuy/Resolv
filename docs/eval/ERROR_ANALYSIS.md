@@ -218,7 +218,7 @@ like-for-like with the committed rows. Neither changes any committed number.
 ## Proposed prompt changes (not made)
 
 All three target the agent's SYSTEM prompt in `resolv/agents/loop.py`. They were not applied because a prompt change
-alters `prompt_sha`, invalidates all six cassettes and every measured number, and needs a paid re-run of the
+alters `prompt_sha`, invalidates all nine cassettes and every measured number, and needs a paid re-run of the
 reference sweep to show its effect.
 
 | For | Proposed line | Expected effect (140 scored reference rows) |

@@ -175,8 +175,8 @@ planted marker token, but no system prompt text appeared (8-gram detector, 0 hit
 ### Red team
 
 288 rows over 11 families, harm 0. The table and what it means are in `docs/eval/REDTEAM.md` section 2; source
-`evals/results/redteam_gpt_oss_120b_card.json`. Red-team cassettes for the PR gate are not recorded yet (the
-account ran out of credit first).
+`evals/results/redteam_gpt_oss_120b_card.json`. Three red-team cassettes for the PR gate are recorded
+on Gemini and replay in CI (`docs/eval/REDTEAM.md` section 4).
 
 ### Latency, cost, reliability (small n)
 
