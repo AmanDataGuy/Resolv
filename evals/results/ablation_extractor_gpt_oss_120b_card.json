@@ -1,0 +1,92 @@
+{
+  "manifest": {
+    "run_id": "2026-11-14T06-38-37+00-00-openrouter-ablation",
+    "git_sha": "dc5d6e8",
+    "git_dirty": true,
+    "provider": "openrouter",
+    "agent_model": "openrouter/openai/gpt-oss-120b",
+    "extractor_model": "openrouter/openai/gpt-oss-120b",
+    "simulator_model": "openrouter/openai/gpt-oss-120b",
+    "judge_model": "openrouter/openai/gpt-oss-120b",
+    "prompt_sha": "88916d9bcec3",
+    "dataset_sha": "9e2ab9486547",
+    "openings_sha": "f8d8d2c63d8e",
+    "temperature": 0.7,
+    "seed": 0,
+    "started_at": "2026-11-14T06:38:37+00:00"
+  },
+  "cards": {
+    "on": {
+      "tasks": 40,
+      "runs": 40,
+      "pass^1": 0.85,
+      "pass^1_ci95_clustered": [
+        0.725,
+        0.95
+      ],
+      "unauthorized_rate": 0.0,
+      "invariant_violation_rate": 0.0,
+      "harmful_block_rate": 1.0,
+      "over_block_rate": 0.075,
+      "resolve_rate": 0.85,
+      "resolve_ci95": [
+        0.7093,
+        0.9294
+      ],
+      "resolve_ci95_clustered": [
+        0.725,
+        0.95
+      ],
+      "resolve_rate_excl_infra": 0.85,
+      "crashes_by_kind": {},
+      "mean_steps": 5.15,
+      "reply_grounded_rate": 1.0,
+      "lookup_before_refund_rate": 1.0,
+      "recovery_rate": 0.8235,
+      "p50_latency_s": 11.1,
+      "p95_latency_s": 18.16,
+      "usd_total": 0.0632,
+      "cost_per_resolution": 0.00186,
+      "unauthorized_usd": {
+        "gross": 0,
+        "excess": 0
+      }
+    },
+    "no_extractor": {
+      "tasks": 40,
+      "runs": 40,
+      "pass^1": 0.825,
+      "pass^1_ci95_clustered": [
+        0.7,
+        0.925
+      ],
+      "unauthorized_rate": 0.0,
+      "invariant_violation_rate": 0.0,
+      "harmful_block_rate": 1.0,
+      "over_block_rate": 0.125,
+      "resolve_rate": 0.825,
+      "resolve_ci95": [
+        0.6805,
+        0.9125
+      ],
+      "resolve_ci95_clustered": [
+        0.7,
+        0.925
+      ],
+      "resolve_rate_excl_infra": 0.825,
+      "crashes_by_kind": {},
+      "mean_steps": 5.28,
+      "reply_grounded_rate": 1.0,
+      "lookup_before_refund_rate": 1.0,
+      "recovery_rate": 0.6842,
+      "p50_latency_s": 11.69,
+      "p95_latency_s": 16.23,
+      "usd_total": 0.0518,
+      "cost_per_resolution": 0.001571,
+      "unauthorized_usd": {
+        "gross": 0,
+        "excess": 0
+      }
+    }
+  }
+}
