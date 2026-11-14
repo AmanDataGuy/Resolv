@@ -7,7 +7,7 @@ bearer token.
 through the same tools.issue_refund gate, so rules 0-6 are re-checked and a human can only approve what they saw
 (the raw action JSON, not the agent's summary). Approve requires an Idempotency-Key header, so a retried click never
 pays twice. An approver can never approve their own refund.
-**Used by:** resolv/api/main.py (`app.include_router(escalations.router)`).
+**Used by:** resolv/api/main.py (`app.include_router(escalations.router)`), resolv/mcp_server.py (`_summary`).
 """
 import hashlib
 import json

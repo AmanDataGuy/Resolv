@@ -2,22 +2,25 @@
 # resolv/api/main.py
 
 **What:** the HTTP front door. POST /token exchanges an order's proof code for a session token; POST /resolve runs
-one complaint end to end (agent -> routing -> notify) and returns the reply, ticket and audit trail.
+one complaint end to end (agent -> routing -> notify) and returns the reply, ticket and audit trail. An optional
+`Idempotency-Key` header on /resolve stores the first response (24 h, ledger idempotency table) and replays it.
 **Why:** no business logic lives here, so the API can never approve something the harness wouldn't. It only adds
 transport concerns: rate limits, token checks, input caps, a wall-clock timeout, generic errors, and online
 telemetry. The lifespan also runs the refund reconciler and the outbox drain every 30 s, and the app serves the
 approvals console at /console. Run: `uvicorn resolv.api.main:app` (add `--proxy-headers` behind a proxy, see
 resolv/api/ratelimit.py).
-**Used by:** uvicorn, tests/test_auth.py, tests/test_async_health.py.
+**Used by:** uvicorn, tests/test_auth.py, tests/test_async_health.py, tests/test_resolve_controls.py.
 """
 import asyncio
+import hashlib
+import json
 import logging
 import time
 import uuid
 from contextlib import asynccontextmanager
 from pathlib import Path
 
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import FastAPI, Header, HTTPException, Request
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
@@ -25,7 +28,7 @@ from resolv.agents.loop import FALLBACK_REPLY, RESOLVE_TIMEOUT_S, run_case
 from resolv.agents.llm import CircuitOpen, new_meter, tokens_split
 from resolv.api import auth, escalations, ratelimit
 from resolv import monitor, observability
-from resolv.harness import audit, routing, tools
+from resolv.harness import audit, ledger, routing, tools
 from resolv.integrations import notify
 
 logger = logging.getLogger(__name__)
@@ -112,21 +115,46 @@ async def _attempt(case_id: str, message: str, customer_id: str) -> dict:
 
 
 # Resolve one complaint and return everything that happened. Rate limit and token are checked before any LLM call.
+# An optional Idempotency-Key makes a retried request return the first response instead of running a second case.
 @app.post("/resolve")
-async def resolve(complaint: Complaint, request: Request) -> dict:
+async def resolve(complaint: Complaint, request: Request,
+                  idempotency_key: str | None = Header(default=None, alias="Idempotency-Key", min_length=1,
+                                                       max_length=255)) -> dict:
     if not ratelimit.is_allowed(f"resolve:{ratelimit.client_ip(request)}", RESOLVE_PER_MINUTE):
         raise HTTPException(status_code=429, detail="Too many requests. Please try again shortly.")
     customer_id = auth.verify_token(complaint.token)
     if customer_id is None:
         raise HTTPException(status_code=401, detail="Unauthorized.")
+    if idempotency_key is None:
+        return await _resolve(complaint.message, customer_id)
 
+    # The customer is part of the hash, so another customer's key is a conflict and never returns their response.
+    request_sha = hashlib.sha256(json.dumps([customer_id, complaint.message]).encode()).hexdigest()
+    state, saved = ledger.claim_key(idempotency_key, "resolve", request_sha)
+    if state == "replay":
+        return saved
+    if state == "conflict":
+        raise HTTPException(422, "Idempotency-Key reused with a different request")
+    if state == "in_flight":
+        raise HTTPException(409, "A request with this Idempotency-Key is still running")
+    try:
+        response = await _resolve(complaint.message, customer_id)
+    except BaseException:
+        ledger.finish_key(idempotency_key, None)  # release the key so the client can retry
+        raise
+    ledger.finish_key(idempotency_key, response)
+    return response
+
+
+# Run the agent (with one retry), record telemetry, route and notify; the /resolve body for a verified customer.
+async def _resolve(message: str, customer_id: str) -> dict:
     new_meter()  # this request's tokens only, even with other requests in flight
     started = time.perf_counter()
     result = None
     for _ in range(MAX_RESOLVE_ATTEMPTS):
         case_id = f"api-{uuid.uuid4().hex[:8]}"  # fresh per attempt, never from the caller
         try:
-            result = await _attempt(case_id, complaint.message, customer_id)
+            result = await _attempt(case_id, message, customer_id)
             break
         except CircuitOpen:
             raise HTTPException(status_code=503, detail=UNAVAILABLE)
@@ -137,9 +165,9 @@ async def resolve(complaint: Complaint, request: Request) -> dict:
 
     # Online eval: label-free metrics to data/telemetry and, when configured, as Langfuse scores. Never a gate.
     prompt_tokens, completion_tokens = tokens_split()
-    telemetry = monitor.record(case_id, complaint.message, result, time.perf_counter() - started,
+    telemetry = monitor.record(case_id, message, result, time.perf_counter() - started,
                                prompt_tokens, completion_tokens)
-    observability.log_request(case_id, complaint.message, result, telemetry)
+    observability.log_request(case_id, message, result, telemetry)
 
     ticket = routing.route(case_id, result["trail"], result["claim"])
     notify.send(ticket)
