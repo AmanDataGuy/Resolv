@@ -1,18 +1,15 @@
 """
 # resolv/agents/extractor.py
 
-**What:** turns a messy customer message into a typed CustomerClaim {order_id, claim_type}, with three backends:
-`adk` (ADK agent with output_schema, the default), `json` (one structured-output completion) and `legacy_line`
-(the GRPO adapter's one-line "order=... type=..." format on the completions endpoint).
+**What:** turns a messy customer message into a typed CustomerClaim {order_id, claim_type}, with two backends:
+`json` (one structured-output completion, the default) and `legacy_line` (the GRPO adapter's one-line
+"order=... type=..." format on the completions endpoint).
 **Why:** reading the order number out of a ramble is the one hard language task, and the fine-tune target. The
 model is trusted only for reading: resolv/harness/validity.py checks the result against the order record, and no
 usable order number must give order_id=None, never a guess. All backends share one instruction text.
 **Used by:** resolv/agents/loop.py (extract), evals/extractor.py.
 """
 import re
-from functools import lru_cache
-
-from google.adk.agents import LlmAgent
 
 from resolv import config
 from resolv.agents.llm import acomplete
@@ -50,19 +47,6 @@ LEGACY_PROMPT = (
 )
 
 observability.register_prompt("extractor", "extractor", EXTRACTOR_INSTRUCTION)
-
-
-# Build the ADK extractor on first use, not at import, so importing never needs a provider key.
-@lru_cache(maxsize=1)
-def get_extractor_agent() -> LlmAgent:
-    return LlmAgent(
-        name="claim_extractor",
-        model=config.get_model("extractor"),
-        description="Extracts a structured claim (order id + claim type) from a messy customer message.",
-        instruction=EXTRACTOR_INSTRUCTION,
-        output_schema=CustomerClaim,
-        output_key="customer_claim",
-    )
 
 
 # Validate a model's JSON text as a CustomerClaim dict; raises ValueError on anything invalid.

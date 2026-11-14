@@ -25,7 +25,7 @@ from opentelemetry import trace
 
 from resolv import config
 from resolv.agents import extractor
-from resolv.agents.llm import acomplete, run_agent_once, usage_of
+from resolv.agents.llm import acomplete, usage_of
 from resolv import observability
 from resolv.harness import audit, guardrails, ledger, pii, tools
 from resolv.harness.policy import Decision
@@ -176,11 +176,9 @@ def _load_step(kind: str, payload):
 async def extract(message: str) -> dict:
     if config.EXTRACTOR_BACKEND == "none":
         return {"order_id": None, "claim_type": None}
-    if config.EXTRACTOR_BACKEND == "json":
-        return await extractor.extract_json(message)
     if config.EXTRACTOR_BACKEND == "legacy_line":
         return await extractor.extract_legacy_line(message)
-    return await run_agent_once(extractor.get_extractor_agent(), message, "customer_claim")
+    return await extractor.extract_json(message)
 
 
 # json.loads hook: NaN/Infinity in tool arguments is rejected, never passed on as a number.

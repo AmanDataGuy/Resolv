@@ -1,8 +1,7 @@
 """
 # resolv/agents/llm.py
 
-**What:** the single choke point for LLM calls: `complete()` (sync) and `acomplete()` (async) over litellm, plus
-`run_agent_once()` for the one ADK agent (the extractor).
+**What:** the single choke point for LLM calls: `complete()` (sync) and `acomplete()` (async) over litellm.
 **Why:** rate limits, retries, a provider circuit breaker, token metering and the `chat` trace span live in one
 place. Hosted providers wait out a 429 (honouring "try again in Ns"); a daily quota raises `QuotaExhausted`;
 self-hosted servers fail fast with no sleep. The token meter is context-local (a ContextVar), so concurrent
@@ -15,19 +14,11 @@ import os
 import random
 import re
 import time
-import uuid
 from collections import deque
 from contextvars import ContextVar
 
-from google.adk.runners import Runner
-from google.adk.sessions import InMemorySessionService
-from google.genai import types
-
 from resolv import config
 from resolv import observability
-
-_session_service = InMemorySessionService()
-_APP_NAME = "resolv"
 
 MAX_LLM_ATTEMPTS = 15
 CALL_TIMEOUT_S = 30  # per acomplete() attempt; one stuck provider call can't hold a request forever
@@ -266,35 +257,3 @@ async def acomplete(trace_role: str | None = None, **kwargs):
                 return resp
         await asyncio.sleep(wait)
 
-
-# Run one ADK agent on one message in a fresh session; return the output_key dict from state, else the final text.
-async def run_agent_once(agent, prompt_text: str, output_key: str | None = None) -> dict | str:
-    if _fake_on():
-        await asyncio.sleep(_fake_latency())
-        return {"order_id": None, "claim_type": None} if output_key else ""
-    model = str(getattr(agent.model, "model", agent.model))
-    for attempt in range(MAX_LLM_ATTEMPTS):
-        session_id = str(uuid.uuid4())
-        await _session_service.create_session(app_name=_APP_NAME, user_id="system", session_id=session_id)
-        runner = Runner(agent=agent, app_name=_APP_NAME, session_service=_session_service)
-        message = types.Content(role="user", parts=[types.Part(text=prompt_text)])
-        try:
-            final_text = ""
-            async for event in runner.run_async(user_id="system", session_id=session_id, new_message=message):
-                if event.is_final_response() and event.content and event.content.parts:
-                    final_text = event.content.parts[0].text or ""
-                    usage = getattr(event, "usage_metadata", None)  # counted on the final chunk only
-                    if usage is not None:
-                        _meter_add(getattr(usage, "prompt_token_count", 0) or 0,
-                                   getattr(usage, "candidates_token_count", 0) or 0,
-                                   getattr(event, "model_version", None))
-            if not output_key:
-                return final_text
-            session = await _session_service.get_session(app_name=_APP_NAME, user_id="system", session_id=session_id)
-            return session.state.get(output_key, {})
-        except Exception as error:
-            wait = _on_error(error, attempt, model)
-        finally:
-            # Sessions are in memory; without this every request leaks one.
-            await _session_service.delete_session(app_name=_APP_NAME, user_id="system", session_id=session_id)
-        await asyncio.sleep(wait)

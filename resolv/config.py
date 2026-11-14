@@ -21,9 +21,6 @@ RESOLV_ENV = os.environ.get("RESOLV_ENV", "dev")
 SELFHOSTED_BASE_URL = os.environ.get("SELFHOSTED_BASE_URL", "http://localhost:8001/v1")
 SELFHOSTED_MODEL = os.environ.get("SELFHOSTED_MODEL", "Qwen/Qwen2.5-1.5B-Instruct")
 
-# Native model name ADK uses when USE_GEMINI=1 (Google now routes gemini-3.5-flash to 3.6).
-GEMINI_MODEL_FAST = "gemini-3.6-flash"
-
 # provider -> (default litellm model, env var holding its one key). Gemini is opt-in only: chosen solely by
 # LLM_PROVIDER=gemini, so a key sitting in .env is never spent without an explicit choice.
 _PROVIDERS = {
@@ -57,9 +54,9 @@ SIMULATOR_MODEL = _resolve(os.environ.get("SIMULATOR_MODEL") or _DEFAULT_MODEL)
 JUDGE_MODEL = _resolve(os.environ.get("JUDGE_MODEL") or _DEFAULT_MODEL)
 ROLE_MODELS = {"agent": AGENT_MODEL, "extractor": EXTRACTOR_MODEL, "simulator": SIMULATOR_MODEL, "judge": JUDGE_MODEL}
 
-# adk = ADK agent with output_schema (default); json = one structured-output completion;
-# legacy_line = the GRPO adapter's one-line "order=... type=..." format on the completions endpoint.
-EXTRACTOR_BACKEND = os.environ.get("EXTRACTOR_BACKEND", "adk")
+# json = one structured-output completion (default); legacy_line = the GRPO adapter's one-line
+# "order=... type=..." format on the completions endpoint; none = no extractor (ablation arm).
+EXTRACTOR_BACKEND = os.environ.get("EXTRACTOR_BACKEND", "json")
 
 # USD per million tokens (input, output). Free models and self-hosted tokens cost 0 here; GPU time for
 # Check the provider pages before trusting a dollar figure.
@@ -68,12 +65,6 @@ PRICES_USD_PER_MTOK = {
     "gemini/gemini-3.6-flash": (0.75, 3.75),
     "gemini/gemini-3.5-flash": (1.50, 9.00),
 }
-
-
-# The key env var a litellm model string needs, or None when it needs none (self-hosted).
-def _key_env(model: str) -> str | None:
-    provider = "selfhosted" if model.startswith("hosted_vllm/") else model.split("/", 1)[0]
-    return _PROVIDERS.get(provider, (None, None))[1]
 
 
 # Extra litellm kwargs a model needs: self-hosted servers get their base URL and a placeholder key.
@@ -92,21 +83,6 @@ def is_priced(model: str) -> bool:
 def price_usd(model: str, prompt_tokens: int, completion_tokens: int) -> float:
     usd_in, usd_out = PRICES_USD_PER_MTOK.get(model, (0.0, 0.0))
     return (prompt_tokens or 0) / 1e6 * usd_in + (completion_tokens or 0) / 1e6 * usd_out
-
-
-# The model object for an ADK agent's `model=`: a native Gemini name with USE_GEMINI=1, else a LiteLlm wrapper.
-def get_model(role: str = "extractor"):
-    if os.environ.get("USE_GEMINI") == "1":
-        if not os.environ.get("GEMINI_API_KEY"):
-            raise RuntimeError("USE_GEMINI=1 but GEMINI_API_KEY is not set.")
-        return GEMINI_MODEL_FAST
-    model = ROLE_MODELS[role]
-    key_env = _key_env(model)
-    if key_env and not os.environ.get(key_env):
-        raise RuntimeError(f"No {key_env} set for {model}. Set it, or set USE_GEMINI=1 to use Gemini deliberately.")
-    from google.adk.models.lite_llm import LiteLlm
-
-    return LiteLlm(model=model, **llm_kwargs(model))
 
 
 # --- Policy thresholds: the only knobs resolv/harness/policy.py enforces. The agent can neither see nor change them. ---
