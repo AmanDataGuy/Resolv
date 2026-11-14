@@ -8,11 +8,18 @@ This is a single-node, demo-grade deployment: one process, one SQLite file (`RES
 
 | SLO | Target | Measured by | Current |
 |---|---|---|---|
-| Availability (`/health` returns 200) | 99% monthly (single machine, no failover) | external uptime probe | not yet measured |
-| End-to-end `/resolve` p95 | ≤ 15 s | `evals/latency.py`, `loadtest/resolve.py` | not yet measured on the deploy |
-| First action p95 (first tool call) | ≤ 6 s | `evals/latency.py` | not yet measured on the deploy |
+| Availability (`/health` returns 200) | 99% monthly (single machine, no failover) | external uptime probe | no probe running yet |
+| End-to-end `/resolve` p95 | ≤ 15 s | `evals/latency.py`, `loadtest/resolve.py` | real model on the deploy: no run yet. Resolv's own share is small: with a fake 1.6 s model, p95 is 1.644 s at 40 req/s |
+| First action p95 (first tool call) | ≤ 6 s | `evals/latency.py` | real model on the deploy: no run yet |
+| `/health` p95 while `/resolve` is busy | ≤ 100 ms | `loadtest/resolve.py` health probe | 9 ms at 40 req/s, 168-179 ms at 60 req/s (fake model, one worker) |
+| Sustained `/resolve` load per node | ≤ 40 req/s (two thirds of the 60 req/s knee) | `loadtest/resolve.py` | 40 req/s held twice: 38.957-38.958 ok/s, 0 errors, p95 1.619-1.644 s |
 | Unauthorized refunds | 0, always | `resolv/invariants.py`, audit trail | must stay 0 |
-| Escalations decided | ≤ 24 h (they expire at 24 h) | `escalations` table: `decided_at - created_at` | not yet measured |
+| Escalations decided | ≤ 24 h (they expire at 24 h) | `escalations` table: `decided_at - created_at` | no production traffic yet |
+
+The load numbers come from `loadtest/results/fake_llm_knee.json`: a fake model with 0.8 s per call, one
+uvicorn worker, a laptop (i5-14450HX, NVMe disk), 60 s per rate. They measure Resolv itself, not the
+provider. With a real model, provider rate limits and per-IP limits (10/min) bind long before 40 req/s.
+The deploy VM is smaller than the laptop, so re-run the sweep there before trusting the capacity row.
 
 ## Dashboards
 
@@ -71,13 +78,50 @@ to start without them.
 
 ## Backup
 
-- Online copy: `sqlite3 data/resolv.db ".backup data/backup/resolv-$(date +%F).db"` (safe while
-  the app is running). Do the same for `RESOLV_PSP_DB`.
+- Online copy (safe while the app is running). The slim Python image has no `sqlite3` CLI, so use
+  Python's backup API:
+  `python -c "import sqlite3; s=sqlite3.connect('data/resolv.db'); d=sqlite3.connect('data/backup/resolv-$(date +%F).db'); s.backup(d); d.close()"`.
+  Where the CLI exists, `sqlite3 data/resolv.db ".backup data/backup/resolv-$(date +%F).db"` does the
+  same. Do the same for `RESOLV_PSP_DB`.
 - Record the chain head with each backup (`python -c "from resolv.harness import ledger; print(ledger.head())"`),
-  so a later restore can be checked with `ledger.verify(head)`.
+  so a later restore can be checked with `ledger.verify(head)`. Keep the head outside the database.
 - Use the host's volume snapshots on top of this. Check the platform documentation for how often
   they run and how long they are kept.
-- Restore drill: not yet performed.
+
+### Restore
+
+1. Stop the API (this is also the refund freeze). Copy the damaged file and its `-wal`/`-shm` aside. Do not edit them.
+2. Delete `resolv.db`, `resolv.db-wal` and `resolv.db-shm`, then copy the backup to `RESOLV_DB`. A
+   leftover `-wal` from the old file would be replayed into the restored one.
+3. `python -c "import sqlite3; print(sqlite3.connect('data/resolv.db').execute('PRAGMA integrity_check').fetchone())"` must print `('ok',)`.
+4. `python -c "from resolv.harness import ledger; print(ledger.verify({'seq': <seq>, 'mac': '<mac>'}))"`
+   with the head saved with that backup must print `(True, None)`. Run it with the same `AUDIT_HMAC_KEY`
+   and `AUDIT_OLD_KEYS` as production, or every record fails.
+5. Before you start the API again: every refund paid after the backup exists at the payment provider but
+   not in the restored ledger, so policy rule 5 cannot see it and could pay it a second time. List the
+   provider's refunds since the backup time and put them back in the ledger (or deny those orders by hand)
+   before refunds reopen. Then start the API, run the reconciler once and send one smoke `/resolve`.
+
+A file that is not a database at all makes `ledger.verify` raise `sqlite3.DatabaseError`. It does not
+return `(False, seq)`. Treat either result as "restore from backup".
+
+### Restore drill, 2026-11-14 (local)
+
+There is no production disk to restore from, so the drill ran on a local ledger (`data/drill/`) seeded
+through the real harness: 5 cases of `lookup_order`, `issue_refund` and `escalate_to_human`, which gave 15
+signed records under a throwaway `AUDIT_HMAC_KEY`.
+
+| Step | Result |
+|---|---|
+| Online backup with the Python backup API, head recorded | 81,920 bytes, head `seq` 15 |
+| Edit one audit row in place (`seq` 3), then `verify(head)` | `(False, 3)`: the edited row is named |
+| Overwrite the live file with junk, then `verify(head)` | raises `DatabaseError: file is not a database` |
+| Restore steps 1-3 | `integrity_check` = `ok` |
+| Restore step 4 | `verify(head)` = `(True, None)` |
+| One new escalation on the restored ledger, then `verify()` | `(True, None)`, head `seq` 16 |
+
+Not covered by this drill: a restore from a host volume snapshot, and the provider match in step 5 (the
+drill's refunds were all denied by policy, so no money moved).
 
 ## Deploy and rollback
 
