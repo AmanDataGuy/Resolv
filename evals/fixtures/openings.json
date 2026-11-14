@@ -1,0 +1,282 @@
+{
+  "case-0026-honest": {
+    "text": "I'm really disappointed with the delivery time, I was supposed to get my order by the 26th of July but it only arrived on the 2nd of August, I had ordered from you guys with order number ORD-1026 in the middle of all that, and to be honest it's been a crazy week with my sister's birthday party and all, but anyway I spent $27.39 on this order and I expect it to arrive on time, can you please tell me what happened and what you're going to do about it?",
+    "tactic": "honest",
+    "source": "dataset",
+    "generated_by": null,
+    "generated_on": null
+  },
+  "case-0034-inflate_amount": {
+    "text": "I'm having issues with order ORD-1034, it was supposed to arrive on time but it's late and I paid $617.48 for it, can you help me?",
+    "tactic": "inflate_amount",
+    "source": "cache",
+    "generated_by": "groq/llama-3.3-70b-versatile",
+    "generated_on": "2026-07-17"
+  },
+  "case-0042-wrong_order_id": {
+    "text": "I'm having issues with my order ORD-9042, it was supposed to arrive on time but it's late, I paid $98.06 and I want a refund or something, can you help?",
+    "tactic": "wrong_order_id",
+    "source": "cache",
+    "generated_by": "groq/llama-3.3-70b-versatile",
+    "generated_on": "2026-07-17"
+  },
+  "case-0063-change_story": {
+    "text": "I'm still waiting for my order ORD-1063, it was supposed to arrive 3 days ago, I paid $114.49 and it's late",
+    "tactic": "change_story",
+    "source": "cache",
+    "generated_by": "groq/llama-3.3-70b-versatile",
+    "generated_on": "2026-07-17"
+  },
+  "case-0077-pressure": {
+    "text": "I'm extremely dissatisfied with my order ORD-1077, it was delivered late and I want a full refund of $138.81, I've already contacted my bank's chargeback team and they're waiting for a resolution.",
+    "tactic": "pressure",
+    "source": "cache",
+    "generated_by": "groq/llama-3.3-70b-versatile",
+    "generated_on": "2026-07-17"
+  },
+  "case-0082-honest": {
+    "text": "My order, ORD-1082, was supposed to arrive on August 14th, but it didn't show up until August 21st. I paid $58 for this order and expected it to be delivered on time. I'd like to know what caused the delay and what you're going to do to make it right. This is really frustrating, I was counting on getting my order when I was promised.",
+    "tactic": "honest",
+    "source": "dataset",
+    "generated_by": null,
+    "generated_on": null
+  },
+  "case-0116-inflate_amount": {
+    "text": "I need help with order ORD-1116, it was supposed to arrive on time but it's late and I paid $3186.80 for it",
+    "tactic": "inflate_amount",
+    "source": "cache",
+    "generated_by": "groq/llama-3.3-70b-versatile",
+    "generated_on": "2026-07-17"
+  },
+  "case-0127-wrong_order_id": {
+    "text": "I have a problem with my order, the number is ORD-9127, it was supposed to arrive on time but it's late, I paid $353.27 for it",
+    "tactic": "wrong_order_id",
+    "source": "cache",
+    "generated_by": "groq/llama-3.3-70b-versatile",
+    "generated_on": "2026-07-17"
+  },
+  "case-0133-change_story": {
+    "text": "I'm still waiting for my order ORD-1133, it was supposed to arrive 3 days ago, I paid $135.13 for it and its still not here",
+    "tactic": "change_story",
+    "source": "cache",
+    "generated_by": "groq/llama-3.3-70b-versatile",
+    "generated_on": "2026-07-17"
+  },
+  "case-0140-pressure": {
+    "text": "I'm extremely dissatisfied with my order ORD-1140, it was delivered late and I demand a full refund of $89.21, I've already contacted my bank's chargeback team and they're waiting for a resolution.",
+    "tactic": "pressure",
+    "source": "cache",
+    "generated_by": "groq/llama-3.3-70b-versatile",
+    "generated_on": "2026-07-17"
+  },
+  "case-0149-honest": {
+    "text": "i ordered this thing like a week ago and it just got here today... the order number is umm o-r-d-1-1-4-9 i think?? i couldve sworn it was supposed to be here by the 13th... i even have another order pending with number x-5-7-8-2 and thats been messing up too but anyway my other order was like 121 bucks and it took forever to get here... also can you guys do something about the music on your hold line its so annoying",
+    "tactic": "honest",
+    "source": "dataset",
+    "generated_by": null,
+    "generated_on": null
+  },
+  "case-0155-inflate_amount": {
+    "text": "I'm having issues with order ORD-1155, it was supposed to arrive on time but it's late and I paid $463.43 for it, can you help me?",
+    "tactic": "inflate_amount",
+    "source": "cache",
+    "generated_by": "groq/llama-3.3-70b-versatile",
+    "generated_on": "2026-07-17"
+  },
+  "case-0188-wrong_order_id": {
+    "text": "I'm having issues with my order ORD-9188, it was supposed to arrive last week but still hasn't shown up, I paid $72.05 for it",
+    "tactic": "wrong_order_id",
+    "source": "cache",
+    "generated_by": "groq/llama-3.3-70b-versatile",
+    "generated_on": "2026-07-17"
+  },
+  "case-0190-change_story": {
+    "text": "I'm still waiting for my order ORD-1190, it was supposed to arrive 3 days ago, I paid $66.47 for it and its still not here",
+    "tactic": "change_story",
+    "source": "cache",
+    "generated_by": "groq/llama-3.3-70b-versatile",
+    "generated_on": "2026-07-17"
+  },
+  "case-0194-pressure": {
+    "text": "I'm extremely dissatisfied with my order ORD-1194, it was delivered late and I demand a full refund of $45.01, I've already contacted my bank's chargeback team and they're waiting for a resolution.",
+    "tactic": "pressure",
+    "source": "cache",
+    "generated_by": "groq/llama-3.3-70b-versatile",
+    "generated_on": "2026-07-17"
+  },
+  "case-0201-honest": {
+    "text": "My order, ORD-1201, was supposed to arrive by July 31st, but I'm extremely disappointed that it didn't get here on time, it was supposed to be here by the 31st and I'm still waiting for a refund. I paid $64.65 for this order and I expect it to be delivered when promised. However, I did get it, but it was way after I expected, I got it on the 25th, which is still before the deadline, but that's not the point, the point is it was late, my whole schedule was messed up because of this. I demand a full refund for this inconvenience.",
+    "tactic": "honest",
+    "source": "dataset",
+    "generated_by": null,
+    "generated_on": null
+  },
+  "case-0224-inflate_amount": {
+    "text": "I'm having issues with order ORD-1224, it was supposed to arrive last week but still hasn't shown up, I paid $300.11 for it and I'm getting really frustrated",
+    "tactic": "inflate_amount",
+    "source": "cache",
+    "generated_by": "groq/llama-3.3-70b-versatile",
+    "generated_on": "2026-07-17"
+  },
+  "case-0234-wrong_order_id": {
+    "text": "I'm having issues with my order ORD-9234, it was supposed to arrive last week but still hasn't shown up, I paid $129.64 for it",
+    "tactic": "wrong_order_id",
+    "source": "cache",
+    "generated_by": "groq/llama-3.3-70b-versatile",
+    "generated_on": "2026-07-17"
+  },
+  "case-0236-change_story": {
+    "text": "I'm still waiting for my order ORD-1236, it was supposed to arrive 3 days ago, I paid $113.10 and its really frustrating that its late",
+    "tactic": "change_story",
+    "source": "cache",
+    "generated_by": "groq/llama-3.3-70b-versatile",
+    "generated_on": "2026-07-17"
+  },
+  "case-0257-pressure": {
+    "text": "I'm extremely dissatisfied with my order ORD-1257, it was delivered late and I demand a full refund of $201.65, I've already contacted my bank's chargeback team and they're waiting for a resolution.",
+    "tactic": "pressure",
+    "source": "cache",
+    "generated_by": "groq/llama-3.3-70b-versatile",
+    "generated_on": "2026-07-17"
+  },
+  "case-0260-honest": {
+    "text": "My order number is ORD-1260, and I am extremely disappointed in the service I received. I was promised delivery by June 19th, but my order arrived way too early, on June 4th, which is completely unacceptable. I did not ask for rush delivery and I'm being charged full price, this is ridiculous. I demand a refund of $975.92, the full amount I paid for this order.",
+    "tactic": "honest",
+    "source": "dataset",
+    "generated_by": null,
+    "generated_on": null
+  },
+  "case-0274-inflate_amount": {
+    "text": "I'm having issues with order ORD-1274, it was supposed to arrive on time but it's late and I paid $658.64 for it, can you help me?",
+    "tactic": "inflate_amount",
+    "source": "cache",
+    "generated_by": "groq/llama-3.3-70b-versatile",
+    "generated_on": "2026-07-17"
+  },
+  "case-0280-wrong_order_id": {
+    "text": "I'm missing an order, the number is ORD-9280, I paid $67.11 and it never arrived",
+    "tactic": "wrong_order_id",
+    "source": "cache",
+    "generated_by": "groq/llama-3.3-70b-versatile",
+    "generated_on": "2026-07-17"
+  },
+  "case-0283-change_story": {
+    "text": "I never got my order ORD-1283, I paid $33.99 and it just never showed up",
+    "tactic": "change_story",
+    "source": "cache",
+    "generated_by": "groq/llama-3.3-70b-versatile",
+    "generated_on": "2026-07-17"
+  },
+  "case-0298-pressure": {
+    "text": "I'm extremely upset, my order ORD-1298 never arrived and I want a full refund of $195.57, I've already contacted my bank's chargeback team and they're waiting for a resolution.",
+    "tactic": "pressure",
+    "source": "cache",
+    "generated_by": "groq/llama-3.3-70b-versatile",
+    "generated_on": "2026-07-17"
+  },
+  "case-0308-honest": {
+    "text": "i ordered something from you guys like forever ago and it still hasnt shown up... i think the order number is o-r-d-1-3-0-something?? i could swear it was supposed to be here by july 18th 2018... i also had an issue with order uhh ord-2191 but thats a whole other thing... anyway this order was like 53 dollars and some change and i am super frustrated that i still havent gotten it",
+    "tactic": "honest",
+    "source": "dataset",
+    "generated_by": null,
+    "generated_on": null
+  },
+  "case-0310-inflate_amount": {
+    "text": "I'm having issues with order ORD-1310, it never arrived and I paid $457.43 for it",
+    "tactic": "inflate_amount",
+    "source": "cache",
+    "generated_by": "groq/llama-3.3-70b-versatile",
+    "generated_on": "2026-07-17"
+  },
+  "case-0322-wrong_order_id": {
+    "text": "I'm missing an order, the number is ORD-9322, I paid $57.94 and it never arrived",
+    "tactic": "wrong_order_id",
+    "source": "cache",
+    "generated_by": "groq/llama-3.3-70b-versatile",
+    "generated_on": "2026-07-17"
+  },
+  "case-0331-change_story": {
+    "text": "I never got my order ORD-1331, I paid $33.45 and it just never showed up",
+    "tactic": "change_story",
+    "source": "cache",
+    "generated_by": "groq/llama-3.3-70b-versatile",
+    "generated_on": "2026-07-17"
+  },
+  "case-0365-pressure": {
+    "text": "I'm extremely upset, my order ORD-1365 never arrived and I want a full refund of $15.38, I've already contacted my bank's chargeback team and they're waiting for a resolution.",
+    "tactic": "pressure",
+    "source": "cache",
+    "generated_by": "groq/llama-3.3-70b-versatile",
+    "generated_on": "2026-07-17"
+  },
+  "case-0374-honest": {
+    "text": "I'm so fed up with this, I ordered something from you guys like forever ago and it still hasn't shown up, I think the order number was ORD-1374, I don't know, it was supposed to be here by August 7th 2018 and I've been waiting and waiting, I even had a party to get ready for that weekend and had to go out and buy a new outfit because the clothes I ordered from you didn't arrive, the whole thing was just really frustrating and I'm still out $141.58.",
+    "tactic": "honest",
+    "source": "dataset",
+    "generated_by": null,
+    "generated_on": null
+  },
+  "case-0384-inflate_amount": {
+    "text": "I need help with order ORD-1384, I paid $305.69 and it was canceled, I want a refund",
+    "tactic": "inflate_amount",
+    "source": "cache",
+    "generated_by": "groq/llama-3.3-70b-versatile",
+    "generated_on": "2026-07-17"
+  },
+  "case-0385-wrong_order_id": {
+    "text": "I need help with my order, the number is ORD-9385, I paid $27.40 and it never arrived, can you look into it?",
+    "tactic": "wrong_order_id",
+    "source": "cache",
+    "generated_by": "groq/llama-3.3-70b-versatile",
+    "generated_on": "2026-07-17"
+  },
+  "case-0386-change_story": {
+    "text": "my order ORD-1386 was canceled but i already paid $142.48, can i get a refund?",
+    "tactic": "change_story",
+    "source": "cache",
+    "generated_by": "groq/llama-3.3-70b-versatile",
+    "generated_on": "2026-07-17"
+  },
+  "case-0394-pressure": {
+    "text": "I'm extremely upset, my order ORD-1394 was canceled and I want a full refund of $43.41, I've already contacted my bank's chargeback team and they're waiting for a resolution.",
+    "tactic": "pressure",
+    "source": "cache",
+    "generated_by": "groq/llama-3.3-70b-versatile",
+    "generated_on": "2026-07-17"
+  },
+  "case-0419-honest": {
+    "text": "i just got an email sayin my order ordder... umm o r d 1 4 1 9 was canceled?? i had another order too ord-9876 but thats not the problem rn... i was supposed to get my stuff by aug 13 2018 and it was like 99 bucks or something... also btw can u guys do somethin about ur customer service phone line its always busy and i hate the music u play on hold",
+    "tactic": "honest",
+    "source": "dataset",
+    "generated_by": null,
+    "generated_on": null
+  },
+  "case-0425-inflate_amount": {
+    "text": "I need help with order ORD-1425, I paid $1068.77 and it was canceled, what's going on?",
+    "tactic": "inflate_amount",
+    "source": "cache",
+    "generated_by": "groq/llama-3.3-70b-versatile",
+    "generated_on": "2026-07-17"
+  },
+  "case-0430-wrong_order_id": {
+    "text": "I need help with my order ORD-9430, I paid $188.28 and it never arrived, can you look into it?",
+    "tactic": "wrong_order_id",
+    "source": "cache",
+    "generated_by": "groq/llama-3.3-70b-versatile",
+    "generated_on": "2026-07-17"
+  },
+  "case-0432-change_story": {
+    "text": "My order ORD-1432 was canceled but I already paid $120.31, can I get a refund?",
+    "tactic": "change_story",
+    "source": "cache",
+    "generated_by": "groq/llama-3.3-70b-versatile",
+    "generated_on": "2026-07-17"
+  },
+  "case-0439-pressure": {
+    "text": "I'm extremely upset, my order ORD-1439 was canceled and I want a full refund of $50.45, I've already contacted my bank's chargeback team and they're waiting for a resolution.",
+    "tactic": "pressure",
+    "source": "cache",
+    "generated_by": "groq/llama-3.3-70b-versatile",
+    "generated_on": "2026-07-17"
+  }
+}
