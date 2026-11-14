@@ -1,0 +1,90 @@
+<!doctype html>
+<!--
+  web/console/index.html
+
+  What: the approvals console. One static page: paste an approver token, see pending escalations, open one,
+  approve or deny it. Served by FastAPI at /console (same origin as /escalations, so no CORS).
+  Why: approvers decide on the raw bound action (the exact JSON whose hash the approval binds to), never on the
+  agent's summary. All server text is rendered with textContent, never as HTML (see app.js).
+-->
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Resolv approvals</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=Space+Grotesk:wght@500;600;700&display=swap">
+  <link rel="stylesheet" href="/console/style.css">
+</head>
+<body>
+  <header>
+    <div class="brand">
+      <div class="eyebrow">Resolv · Human in the loop</div>
+      <h1>Approvals console</h1>
+      <div class="accent-line"></div>
+    </div>
+    <span id="who"></span>
+    <button id="logout" hidden>Sign out</button>
+  </header>
+
+  <main>
+    <section id="login">
+      <h2>Approver token</h2>
+      <p>Mint one locally with <code>python -m resolv.api.auth --mint-approver &lt;id&gt;</code>. It is kept in this tab only.</p>
+      <form id="login-form">
+        <label for="token">Bearer token</label>
+        <input id="token" type="password" autocomplete="off" required>
+        <button type="submit">Sign in</button>
+      </form>
+    </section>
+
+    <section id="queue" hidden>
+      <h2>Pending escalations <small id="updated"></small></h2>
+      <p id="empty" hidden>Nothing waiting for a decision.</p>
+      <table>
+        <thead><tr><th>ID</th><th>Order</th><th>Kind</th><th>Amount</th><th>Reason</th><th>Age</th><th>Expires in</th></tr></thead>
+        <tbody id="rows"></tbody>
+      </table>
+    </section>
+
+    <section id="detail" hidden>
+      <button id="back">&larr; Back to queue</button>
+      <h2 id="d-title"></h2>
+      <div id="mismatch" class="banner" role="alert" hidden></div>
+
+      <h3>Bound action (what you approve)</h3>
+      <pre id="d-action"></pre>
+      <p>action_hash: <code id="d-hash"></code></p>
+
+      <h3>Order facts (from the record)</h3>
+      <pre id="d-order"></pre>
+
+      <h3>Policy explanation</h3>
+      <ul id="d-policy"></ul>
+
+      <h3>Reason <span class="untrusted">may contain agent text (untrusted)</span></h3>
+      <p id="d-reason" class="untrusted-box"></p>
+
+      <h3>Audit trail</h3>
+      <table>
+        <thead><tr><th>#</th><th>Tool</th><th>Order</th><th>Rule</th><th>OK</th><th>Caller</th><th>Approver</th><th>Result</th></tr></thead>
+        <tbody id="d-trail"></tbody>
+      </table>
+
+      <form id="decide">
+        <label for="note">Note (required, at least 5 characters)</label>
+        <textarea id="note" minlength="5" maxlength="2000" required></textarea>
+        <div class="actions">
+          <button type="button" id="approve">Approve</button>
+          <button type="button" id="deny">Deny</button>
+        </div>
+      </form>
+      <pre id="d-result" hidden></pre>
+    </section>
+
+    <p id="error" class="banner" role="alert" hidden></p>
+  </main>
+
+  <script src="/console/app.js"></script>
+</body>
+</html>

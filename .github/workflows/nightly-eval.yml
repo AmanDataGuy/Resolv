@@ -1,55 +1,84 @@
-# Nightly eval regression gate — Phase 4.
-#
-# ci.yml runs the FREE, deterministic half (lint + the harness/eval-math tests) on every push, with
-# no API key. THIS workflow runs the model-gated half: it exercises the real LLM against the pinned
-# baselines and fails the build on regression. Because that costs real LLM calls, it runs on a
-# schedule (not every push) and ONLY when a key is provided.
-#
-# BILLING — READ THIS: the model steps run only if a `GEMINI_API_KEY` repository secret exists.
-# Without it they skip and the job passes green (nothing to gate). Use YOUR OWN paid key here — never
-# a borrowed one — because a scheduled run spends real money every night.
-name: Nightly eval gate
+# Scheduled, model-gated evals. Costs real API calls, so it runs only when GROQ_API_KEY is set;
+# without it every job shows as SKIPPED (not green). Gates compare against same-model reference
+# baselines in evals/baselines/; until those are created they skip too.
+#   nightly: extractor regression + 8-task agent smoke   weekly: the full 40-task sweep
+# Exit codes from the gates: 0 pass, 1 regression, 78 inconclusive (reported, not failed).
+name: Scheduled eval
 
 on:
   schedule:
-    - cron: "0 6 * * *"        # 06:00 UTC daily
-  workflow_dispatch: {}         # ...and a manual "Run workflow" button
+    - cron: "0 6 * * *"     # nightly 06:00 UTC
+    - cron: "0 7 * * 0"     # weekly, Sunday 07:00 UTC
+  workflow_dispatch: {}
+
+env:
+  RESOLV_ENV: eval
+  LLM_PROVIDER: groq
+  AGENT_MODEL: groq/openai/gpt-oss-120b
+  EXTRACTOR_MODEL: groq/openai/gpt-oss-120b
+  SIMULATOR_MODEL: groq/openai/gpt-oss-120b
+  NIGHTLY_USD_CAP: "0.50"
 
 jobs:
-  eval-gate:
+  check:
+    runs-on: ubuntu-latest
+    outputs:
+      has_key: ${{ steps.k.outputs.has_key }}
+    steps:
+      - id: k
+        run: echo "has_key=${{ secrets.GROQ_API_KEY != '' }}" >> "$GITHUB_OUTPUT"
+
+  nightly:
+    needs: check
+    if: needs.check.outputs.has_key == 'true' && github.event.schedule != '0 7 * * 0'
     runs-on: ubuntu-latest
     env:
-      HAVE_KEY: ${{ secrets.GEMINI_API_KEY != '' }}
-      USE_GEMINI: "1"           # native ADK Gemini path — no litellm, no warning (config.get_model)
-      GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+      GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
         with:
           python-version: "3.11"
           cache: pip
-      - run: pip install -r requirements.txt
-
-      - name: Skip notice (no key)
-        if: env.HAVE_KEY != 'true'
-        run: echo "No GEMINI_API_KEY secret set — model-gated eval skipped. Add your own paid key to enable."
-
-      # The cheap, meaningful nightly gate: the extractor eval over the held-out split, McNemar-tested
-      # against the pinned baseline (eval/baselines/extractor.json). Fails (exit 1) on a significant
-      # accuracy drop OR any rise in hallucination. ~92 single-shot calls — cents, not dollars.
+      - run: pip install -r requirements-eval.txt
       - name: Extractor regression gate
-        if: env.HAVE_KEY == 'true'
-        run: python -m eval.extractor --baseline
+        if: hashFiles('evals/baselines/extractor_ref_groq.json') != ''
+        run: python -m evals.extractor --baseline evals/baselines/extractor_ref_groq.json
+      - name: Agent smoke gate
+        if: hashFiles('evals/baselines/agent_ref_groq.json') != ''
+        run: |
+          set +e
+          python -m evals.runner --subset 8 --n 2 --k 1 --out nightly.jsonl \
+            --gate evals/baselines/agent_ref_groq.json
+          code=$?
+          if [ "$code" = "78" ]; then echo "::warning::gate inconclusive"; exit 0; fi
+          exit $code
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: nightly-results
+          path: evals/results/nightly*
+          if-no-files-found: ignore
 
-      # Agent sweep gate (pass^k, unauthorized). 2026-08-15 audit found neither ci.yml nor this
-      # workflow ever gated on pass^k at all: a change that silently drops pass^3 from 0.96 to
-      # 0.80 shipped green. Added 2026-08-15 as workflow_dispatch-only (manual) because
-      # _gate_verdict()'s tolerance scales off the PINNED baseline's 200-run sample, not this
-      # smoke run's much smaller one, and its false-positive rate on a tiny sample hadn't been
-      # checked against a live key. Verified 2026-08-21: ran this exact command twice against
-      # Gemini (16 real calls each, ~$0.40/run, $0.85 total) and both runs landed on the
-      # identical result — pass^1=1.0, delta=+0.015, unauthorized=0, not failed. Consistent
-      # across both runs, so this is now on the automatic nightly schedule too, not manual-only.
-      - name: Agent sweep gate (smoke)
-        if: env.HAVE_KEY == 'true'
-        run: python -m eval.runner --tasks 8 --n 2 --k 1 --baseline
+  weekly:
+    needs: check
+    if: needs.check.outputs.has_key == 'true' && (github.event.schedule == '0 7 * * 0' || github.event_name == 'workflow_dispatch')
+    runs-on: ubuntu-latest
+    env:
+      GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.11"
+          cache: pip
+      - run: pip install -r requirements-eval.txt
+      - name: Full sweep (cost-capped, non-blocking)
+        continue-on-error: true
+        run: python -m evals.runner --tasks 40 --n 5 --out weekly.jsonl --usd-cap "$NIGHTLY_USD_CAP"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: weekly-results
+          path: evals/results/weekly*
+          if-no-files-found: ignore

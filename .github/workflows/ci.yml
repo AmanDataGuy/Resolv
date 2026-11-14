@@ -1,8 +1,7 @@
-# CI — lint + test on every push and pull request.
+# CI: lint + keyless tests on every push and pull request.
 #
-# No secrets are needed: the LLM agents (extractor + agent loop) are never exercised by the
-# suite — only the deterministic harness (policy, tools, validity, routing) and the eval math,
-# which run with no API key. That's the point of keeping enforcement out of the model.
+# No secrets: the suite exercises the deterministic harness, the eval math and recorded
+# trajectories only. LLM-quality tests (tests/llm/) skip themselves without a provider key.
 name: CI
 
 on: [push, pull_request]
@@ -10,14 +9,16 @@ on: [push, pull_request]
 jobs:
   test:
     runs-on: ubuntu-latest
+    env:
+      RESOLV_ENV: test
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
         with:
           python-version: "3.11"
           cache: pip
-      - run: pip install -r requirements.txt
+      - run: pip install -r requirements-dev.txt
       - name: Lint
         run: ruff check .
       - name: Tests
-        run: pytest -q
+        run: pytest -q -p no:cacheprovider

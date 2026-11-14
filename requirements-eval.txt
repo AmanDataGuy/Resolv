@@ -1,0 +1,5 @@
+# Offline evals and LLM-quality tests. deepeval is pinned: newer releases eagerly import langchain
+# from wrappers this project never uses.
+-r requirements.txt
+deepeval==4.2.0
+pandas==2.3.3             # scripts/gen_complaint_cases.py reads the raw Olist CSVs

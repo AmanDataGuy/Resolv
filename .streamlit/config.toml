@@ -1,16 +1,25 @@
 # Pins the demo's appearance so it looks the same for every viewer.
 #
 # Streamlit otherwise follows the browser/OS theme, which means a reviewer on dark mode sees a
-# different page than the one that was designed. base="light" fixes that. The font is the stock
-# sans-serif stack — deliberately standard, because the demo should read as an instrument panel,
-# not a brand.
+# different page than the one that was designed. base="light" fixes that. Colors and fonts follow
+# the Blue Professional system shared with web/console: cream paper, one cobalt accent, Space
+# Grotesk headings over Inter body.
 [theme]
 base = "light"
-font = "sans serif"
+primaryColor = "#1e2bfa"
+backgroundColor = "#fdfae7"
+secondaryBackgroundColor = "#f3f0de"
+textColor = "#111111"
+borderColor = "#c9cbf3"
+baseRadius = "10px"
+font = "Inter:https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap"
+headingFont = "'Space Grotesk':https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&display=swap"
 
-[server]
+[browser]
 # The demo takes typed input; no need to phone home with usage stats.
 gatherUsageStats = false
+
+[server]
 # Source files never change while a deployed container is running -- the hot-reload watcher
 # (watchdog/inotify) is a dev-only convenience that only burns a scarce kernel resource here.
 # Render's free-tier containers hit a low inotify-instance ceiling under it ("OSError: [Errno 24]

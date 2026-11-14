@@ -1,40 +1,15 @@
-"""Builds the extractor's dataset AND the demo database, in one pass, from real Olist data.
+"""
+# scripts/gen_complaint_cases.py
 
-WHY. The first fine-tune failed because the task was too easy (the answer was already in the
-input) — see study/finetuning_report.md sec 12. This dataset fixes that: the model must read a
-messy customer message and recover WHICH order and WHAT KIND of problem. Ground truth is exact
-because every message is generated FROM a known real Olist order, so the reward stays verifiable.
-
-FOUR REAL SITUATIONS -> THREE CLAIM TYPES (each backed by a real Olist order_status — nothing
-invented):
-
-    situation      Olist source                          claim_type      verifier truth
-    late           delivered, actual DATE > estimated    late_delivery   true
-    on_time        delivered, actual DATE <= estimated   late_delivery   FALSE (customer wrong)
-    never_arrived  status == shipped (never delivered)   never_arrived   true
-    canceled       status == canceled                    order_canceled  true
-
-Including on_time is the point: it's the only way the verifier can ever answer FALSE, which is what
-gives the reward variance (the saturation fix, applied at the data level this time).
-
-Note DATE, not timestamp — see build_orders(). And `unavailable` was dropped; Olist only has 6
-such orders, which is not a class, it's a rounding error. See SAMPLES.
-
-The generator and harness/validity.py derive ground truth by two independent paths. main() asserts
-they agree on every order before writing any cases — see _assert_verifier_agrees().
-
-TWO OUTPUTS:
-    data/db/orders.json             — the demo database the harness verifies claims against.
-    data/datasets/complaint_cases.json — the messy messages + exact answer keys.
-
-Scored on (schemas.CustomerClaim): order_id + claim_type. NOT the amount/dates — customers
-misremember those, so the harness looks them up from orders.json. The model reads; the harness
-knows the numbers.
-
-HARD CASES ARE DELIBERATE: spelled-out/typo'd order numbers, a red-herring second order number, a
-confidently-wrong amount, and a share of hard cases with NO order number (answer must be None).
-
-Resumable (caches every message). Run: python scripts/gen_complaint_cases.py
+**What:** builds the demo database (`data/db/orders.json`) and the extractor dataset
+(`data/datasets/complaint_cases.json`) in one pass from real Olist orders, with an LLM writing one messy
+customer message per order.
+**Why:** every message is generated from a known real order, so the answer key (order_id + claim_type) is exact.
+Four situations map to three claim types: late and on_time (both `late_delivery`; on_time is the customer being
+wrong, the only way the verifier can say FALSE), never_arrived, canceled. Hard cases are deliberate (spelled-out or
+typo'd numbers, a red-herring order number, no order number at all). Generator and resolv/harness/validity.py derive truth
+independently and must agree before any case is written. Resumable: every message is cached on its prompt.
+**Used by:** run by hand: `python scripts/gen_complaint_cases.py`.
 """
 import hashlib
 import json
@@ -57,29 +32,12 @@ CACHE_FILE = DATA_DIR / "cache" / "complaint_cache.json"
 
 SEED = 7
 
-# Only sample orders promised on/after this date.
-#
-# WHY THIS EXISTS. Olist spans 2016-09 to 2018-11. harness/policy.py pins the demo clock at
-# 2018-10-20 and denies claims on orders older than CLAIM_WINDOW_DAYS (90). Sampling uniformly
-# across two years left only 14% of orders inside that window — so 86% of eval tasks would be
-# correctly resolved by "deny", and an agent that denied everything unconditionally would score
-# 86%. That's a benchmark measuring nothing: the same failure as a saturated reward, arrived at
-# from the data side instead of the reward side.
-#
-# A real support queue holds recent orders anyway — the uniform sample was the artificial part.
-# This date was picked by sweeping it against the in-window fraction (2018-04-01 -> 33%,
-# 2018-06-01 -> 65%, 2018-06-15 -> 80%). 2018-05-01 lands 52%, near a coin flip, so neither
-# "always deny" nor "always allow" beats chance and the window rule fires often without
-# dominating. Pools after the filter (late 2275, on_time 35016, shipped 419, canceled 214) all
-# still exceed what SAMPLES asks for — verified, no situation comes up short.
+# Only orders promised on/after this date. A uniform two-year sample put 86% of orders outside the 90-day claim
+# window (an always-deny agent would score 86%); 2018-05-01 puts about half inside it, so neither "always deny"
+# nor "always allow" beats chance. Every situation's pool still exceeds what SAMPLES asks for.
 MIN_PROMISED = "2018-05-01"
 
-# How many orders to sample per situation (real Olist has far more of each).
-#
-# `unavailable` is GONE. It asked for 80 and Olist only has 6 orders with that status, so it
-# was a 6-example class: too few to train on, too few to measure (a per-class accuracy over
-# n=6 moves in 17-point steps, and pass^k over 6 tasks reports nothing). Four claim types with
-# one of them a rounding error is worse than three real ones.
+# Orders sampled per situation. `unavailable` was dropped: Olist has only 6 such orders, too few to train or measure.
 SAMPLES = {"late": 180, "on_time": 100, "never_arrived": 100, "canceled": 80}
 CLAIM_BY_SITUATION = {
     "late": "late_delivery",
@@ -88,12 +46,8 @@ CLAIM_BY_SITUATION = {
     "canceled": "order_canceled",
 }
 
-# Groq: 30 req/min/key. Rotate + back off (same as build_initial_dataset). Offline high-volume
-# work stays on Groq's free tier; the Gemini key is reserved for the low-volume live path.
-_GROQ_KEYS = [
-    k for k in (os.environ.get("GROQ_API_KEY"), os.environ.get("GROQ_API_KEY_2"), os.environ.get("GROQ_API_KEY_3")) if k
-]
-_key_i = 0
+# One Groq key; on a 429 the generator waits and retries.
+_GROQ_KEY = os.environ.get("GROQ_API_KEY")
 
 SYSTEM = (
     "You write realistic customer-support chat messages. Output ONLY the message the customer "
@@ -123,18 +77,18 @@ _STYLE = {
 _MIX = ["easy"] * 3 + ["medium"] * 4 + ["hard"] * 3  # 30/40/30
 
 
+# The difficulty of case i, cycling through the 30/40/30 mix.
 def _difficulty(i: int) -> str:
     return _MIX[i % len(_MIX)]
 
 
+# Every 3rd hard case drops the order number, so the model learns to answer "unknown" instead of inventing one.
 def _omit_order(i: int, difficulty: str) -> bool:
-    """Every 3rd hard case drops the order number — teaches the model to answer 'unknown'
-    rather than invent an order id."""
     return difficulty == "hard" and i % 3 == 0
 
 
+# Sample real Olist orders per situation into demo-DB records with friendly ORD-#### ids.
 def build_orders() -> list[dict]:
-    """Sample real Olist orders across the five situations into demo-DB records with friendly IDs."""
     orders = pd.read_csv(
         RAW / "olist_orders_dataset.csv",
         parse_dates=["order_estimated_delivery_date", "order_delivered_customer_date"],
@@ -144,12 +98,8 @@ def build_orders() -> list[dict]:
 
     est, act = "order_estimated_delivery_date", "order_delivered_customer_date"
 
-    # Bucket on DATES, not timestamps. Olist parses these as datetimes, but a record stores
-    # `.date()` and harness/validity.py compares those date STRINGS. Splitting on the raw
-    # timestamp put "promised the 13th 00:00, arrived the 13th 18:04" in the late pool — late
-    # by hours, same date, so the verifier called it on-time. That silently mislabelled 20 of
-    # 180 late orders. Truncate first, then compare, and generator + verifier agree by
-    # construction — asserted in main() so it can never drift back.
+    # Bucket on dates, not timestamps: validity.py compares date strings, and same-day "late by hours" orders were
+    # once mislabelled late. main() asserts generator and verifier agree.
     orders["_est_d"] = orders[est].dt.normalize()
     orders["_act_d"] = orders[act].dt.normalize()
     orders = orders[orders["_est_d"] >= MIN_PROMISED]  # recent orders only — see MIN_PROMISED
@@ -169,8 +119,7 @@ def build_orders() -> list[dict]:
         df = df.sample(min(n, len(df)), random_state=SEED)
         for _, r in df.iterrows():
             delivered_date = r[act].date().isoformat() if pd.notna(r[act]) else None
-            # From the normalised dates, for the same reason the pools are: days_late must
-            # agree with what a date-string comparison sees, so late => days_late >= 1 always.
+            # from the normalised dates, so late always means days_late >= 1
             days_late = int((r["_act_d"] - r["_est_d"]).days) if situation == "late" else 0
             records.append(
                 {
@@ -189,30 +138,18 @@ def build_orders() -> list[dict]:
     return records
 
 
+# Stop the run unless every order's situation label matches what resolv/harness/validity.py independently derives.
 def _assert_verifier_agrees(orders: list[dict]) -> None:
-    """Every order's `situation` label must match what harness/validity.py independently says.
-
-    These are two separate code paths to the same truth: the generator labels from the Olist
-    CSV columns, the verifier re-derives it from the written record. They must never disagree.
-    When they did (the timestamp/date bug in build_orders), 20 orders carried a `late` label
-    the verifier scored FALSE — harmless for extractor training, but it would have silently
-    handed the agent eval the wrong answer key on 8% of tasks, and nothing would have flagged
-    it. A wrong number that looks right is worse than no number.
-
-    Run on every regeneration, so the bug cannot creep back in quietly.
-    """
     import sys
 
     sys.path.insert(0, str(Path(__file__).parent.parent))  # run as a script; repo root isn't on the path
-    from harness.validity import verify_claim
-    from schemas import CustomerClaim
+    from resolv.harness.validity import verify_claim
+    from resolv.schemas import CustomerClaim
 
     disagreed = []
     for o in orders:
         claim = CustomerClaim(order_id=o["order_id"], claim_type=CLAIM_BY_SITUATION[o["situation"]])
-        # on_time is the one situation where the claim is FALSE by design — that's the whole
-        # point of including it (it's the only way the verifier can ever answer no).
-        expected = o["situation"] != "on_time"
+        expected = o["situation"] != "on_time"  # on_time is FALSE by design
         if verify_claim(claim).claim_true is not expected:
             disagreed.append(o["order_id"])
 
@@ -224,6 +161,7 @@ def _assert_verifier_agrees(orders: list[dict]) -> None:
     print(f"  generator/verifier agree on all {len(orders)} orders")
 
 
+# The generation prompt for one order: the grievance, the real facts, and the style for its difficulty.
 def _prompt(order: dict, difficulty: str, omit: bool) -> str:
     situation = order["situation"]
     lines = [
@@ -243,31 +181,28 @@ def _prompt(order: dict, difficulty: str, omit: bool) -> str:
     return "\n".join(lines)
 
 
+# One customer message from Groq, waiting and retrying on rate limits.
+# The model is the one the committed dataset was generated with (since retired from Groq's catalog).
 def _generate(prompt: str) -> str:
-    global _key_i
-    # Check explicitly rather than letting range(0) fall through to the raise below. With no
-    # keys loaded that loop runs zero times and reports "all keys exhausted" — which sent me
-    # looking at Groq's rate limits when the real cause was that .env had never been read.
-    # An error message that names the wrong cause is worse than no error message.
-    if not _GROQ_KEYS:
-        raise RuntimeError("No GROQ_API_KEY* found in the environment or .env — nothing to generate with.")
+    if not _GROQ_KEY:
+        raise RuntimeError("No GROQ_API_KEY found in the environment or .env — nothing to generate with.")
 
-    for _ in range(len(_GROQ_KEYS) * 3):
+    for _ in range(6):
         try:
             resp = completion(
                 model="groq/llama-3.3-70b-versatile",
                 messages=[{"role": "system", "content": SYSTEM}, {"role": "user", "content": prompt}],
-                api_key=_GROQ_KEYS[_key_i % len(_GROQ_KEYS)],
+                api_key=_GROQ_KEY,
             )
             return resp.choices[0].message.content.strip()
         except Exception as e:
             if "rate_limit" not in str(e).lower() and "429" not in str(e):
                 raise
-            _key_i += 1
-            time.sleep(2)
-    raise RuntimeError("Groq rate limit: all keys exhausted — rerun later, the cache resumes.")
+            time.sleep(10)
+    raise RuntimeError("Groq rate limit persisted — rerun later, the cache resumes.")
 
 
+# Write the order DB, check it against the verifier, then generate (or reuse cached) messages and write the cases.
 def main() -> None:
     if not (RAW / "olist_orders_dataset.csv").exists():
         raise SystemExit(f"{RAW} not found — the raw Olist CSVs are required.")
@@ -284,12 +219,7 @@ def main() -> None:
         difficulty = _difficulty(i)
         omit = _omit_order(i, difficulty)
 
-        # Cache on the PROMPT, not on order_id. "ORD-1000" is a position in the sample, not an
-        # identity: change the pools and ORD-1000 becomes a different Olist order, so an
-        # order_id-keyed cache would hand the new order the old one's message — quoting a
-        # different amount, different dates, even a different order number in the text. The
-        # ground truth would be wrong and nothing would say so. Hashing the prompt means a hit
-        # is only ever a message generated from exactly these facts.
+        # cached on the prompt, not order_id: ORD-1000 is a sample position and can become a different order
         prompt = _prompt(order, difficulty, omit)
         key = hashlib.sha256(prompt.encode()).hexdigest()[:16]
         if key not in cache:

@@ -1,19 +1,18 @@
-"""GRPO / RLVR training for the CLAIM EXTRACTOR — the second, harder fine-tune.
+"""
+# scripts/train_extractor.py
 
-WHY THIS ONE HAS HEADROOM. The first fine-tune (train_grpo.py) trained the drafter, which was
-handed the facts and only had to echo them — the reward saturated (study/finetuning_report.md
-sec 6.4, 12). This one trains the extractor to recover {order_id, claim_type} from a MESSY
-customer message, where the answer is genuinely hard to find. So the reward has real variance,
-which is what GRPO needs to learn.
-
-THE REWARD IS VERIFIABLE, NOT JUDGED. Each rollout's extracted order id + claim type are checked
-by exact match against the known ground truth — the same check harness/validity.py performs in
-production. No LLM judge. That reuse is the whole thesis.
-
-Runs on Kaggle (GPU). Kaggle cell:
+**What:** GRPO (RLVR) LoRA fine-tune of Qwen2.5-1.5B-Instruct as the claim extractor, with the
+held-out accuracy measured before and after training and a paired McNemar test on the delta.
+**Why:** recovering {order_id, claim_type} from a messy message is genuinely hard, so the reward
+has variance for GRPO to learn from. The reward is verifiable (exact match against ground truth,
+the same check resolv/harness/validity.py makes), not judged. Per-case rows are saved so the paired test
+can be recomputed later. Constants are duplicated from evals/extractor.py on purpose: this file runs
+standalone on Kaggle, where the repo is not installed. The output is the one-line format
+`order=<ORD-####|none> type=<...>`, which only the `line` arm of inference/serve_bench.py serves.
+**Used by:** the owner, by hand. Kaggle cell:
     !pip install -q "transformers==4.56.1" "trl==0.21.0" peft datasets accelerate
-    !pip uninstall -y torchvision torchao        # remove the mismatched preinstalls (see the report)
-    # then paste this file's body, or upload it and run it. Needs data/datasets/complaint_cases.json.
+    !pip uninstall -y torchvision torchao        # remove the mismatched preinstalls
+    # then run this file. Needs data/datasets/complaint_cases.json.
 
 Output: models/adapters/extractor/latest
 """
@@ -34,19 +33,16 @@ TEST_FRACTION = 0.2   # held out of training; the accuracy we print is measured 
 SEED = 0
 
 
+# complaint_cases.json on Kaggle (/kaggle/input/...) or in the repo, checked in that order.
 def _find_cases() -> Path:
-    """complaint_cases.json, wherever it lives. On Kaggle it's under /kaggle/input/<dataset>/;
-    locally it's in the repo. Checked in that order so the same file runs in both places."""
     for hit in glob.glob("/kaggle/input/**/complaint_cases.json", recursive=True):
         return Path(hit)
     return Path("data/datasets/complaint_cases.json")
 
 
 CASES = _find_cases()
-# Must mirror schemas.ClaimType exactly — the training prompt has to offer the same claim types
-# the harness accepts, or the fine-tune learns a label the verifier will always reject. Hardcoded
-# (not imported from schemas) because this script is meant to run standalone in a Kaggle/Colab
-# notebook where the repo isn't installed. item_unavailable was dropped; keep these three in sync.
+# Must mirror schemas.ClaimType exactly, or the fine-tune learns a label the verifier rejects.
+# Hardcoded because this script runs standalone without the repo installed.
 CLAIM_TYPES = ["late_delivery", "never_arrived", "order_canceled"]
 
 INSTRUCTION = (
@@ -56,6 +52,7 @@ INSTRUCTION = (
 )
 
 
+# Every case as {prompt, order_id_gt, claim_type_gt}; a null order becomes "none".
 def _all_rows() -> list[dict]:
     rows = []
     for c in json.loads(CASES.read_text()):
@@ -70,21 +67,21 @@ def _all_rows() -> list[dict]:
     return rows
 
 
+# Deterministic (train, test) split; test rows never reach training.
 def _split(rows: list[dict]) -> tuple[list[dict], list[dict]]:
-    """Deterministic train/test split. The test rows are held out of training entirely, so the
-    accuracy we print is on messages the model never saw — the only kind of number worth a CV."""
     shuffled = list(rows)
     random.Random(SEED).shuffle(shuffled)
     n_test = int(len(shuffled) * TEST_FRACTION)
     return shuffled[n_test:], shuffled[:n_test]  # (train, test)
 
 
+# First ORD-#### the model emits, normalised; "none" if it emits none.
 def _parse_order(text: str) -> str:
-    """First ORD-#### the model emits, normalised; 'none' if it says none / emits nothing."""
     m = re.search(r"ORD[-\s]?(\d{3,5})", text, re.IGNORECASE)
     return f"ORD-{m.group(1)}" if m else "none"
 
 
+# First known claim type in the text, or "".
 def _parse_type(text: str) -> str:
     t = text.lower()
     for ct in CLAIM_TYPES:
@@ -93,9 +90,8 @@ def _parse_type(text: str) -> str:
     return ""
 
 
+# +0.5 for the exact order id (including a correct "none"), +0.5 for the claim type.
 def extraction_reward(completions, order_id_gt, claim_type_gt, **kwargs) -> list[float]:
-    """+0.5 for the exact order id (incl. correctly saying 'none'), +0.5 for the claim type.
-    Identical logic to harness/validity.py's inputs — deterministic, verifiable, no judge."""
     rewards = []
     for text, oid, ct in zip(completions, order_id_gt, claim_type_gt):
         r = 0.0
@@ -107,27 +103,16 @@ def extraction_reward(completions, order_id_gt, claim_type_gt, **kwargs) -> list
     return rewards
 
 
+# McNemar (copy of evals/metrics.py::mcnemar); b = base right/tuned wrong, c = the reverse.
 def _mcnemar(b: int, c: int) -> tuple[float, bool]:
-    """Duplicated from eval/metrics.py::mcnemar() on purpose — this script has to run standalone
-    in a Kaggle notebook where the repo isn't installed (same reasoning eval/extractor.py gives
-    for duplicating the split constants). b = base-right/tuned-wrong, c = the reverse."""
     if b + c == 0:
         return (0.0, False)
     chi2 = (abs(b - c) - 1) ** 2 / (b + c)
     return (chi2, chi2 > 3.841)  # 1 df, alpha=0.05
 
 
+# Held-out accuracy with greedy decoding; returns per-case both_ok so the paired test is possible.
 def measure(model, tok, rows: list[dict]) -> dict:
-    """Extraction accuracy on held-out rows — order id, claim type, and both-right. Greedy decode,
-    the same parse the reward uses. This is THE number: run it on the base model and again on the
-    tuned one, on messages neither was trained on, and the delta is what RLVR bought.
-
-    Returns per-case `both_ok` alongside the aggregate, not just the aggregate. A prior fine-tune
-    on this project logged only aggregates and the resulting "+0.016" claim needed a McNemar test
-    it could never get, because b and c (which specific cases flipped) were unrecoverable — see
-    eval/runner.py's docstring for the full story. Returning rows here is what lets main() compute
-    a real paired test the same run, rather than repeating that mistake in a second script.
-    """
     model.eval()
     order_ok = type_ok = both_ok = 0
     per_case = []
@@ -145,6 +130,7 @@ def measure(model, tok, rows: list[dict]) -> dict:
     return {"order": order_ok / n, "type": type_ok / n, "both": both_ok / n, "n": n, "per_case": per_case}
 
 
+# Measure base, train GRPO on the train split, measure tuned, test the paired delta, save rows.
 def main() -> None:
     tok = AutoTokenizer.from_pretrained(BASE)
     if tok.pad_token is None:
@@ -191,18 +177,13 @@ def main() -> None:
     print(f"TUNED  order={tuned['order']:.3f}  type={tuned['type']:.3f}  both={tuned['both']:.3f}")
     print(f"Δ both-right = {tuned['both'] - base['both']:+.3f}   (n={base['n']} held-out messages)")
 
-    # Paired, not just a delta: b = base got it right and tuned lost it, c = the reverse. Both
-    # loops ran over test_rows IN THE SAME ORDER, so per_case[i] in each list refers to the same
-    # held-out message — that pairing is what makes McNemar valid here rather than two unrelated
-    # accuracy numbers.
+    # Paired: both measure() loops ran over test_rows in the same order, so per_case[i] is the same message.
     b = sum(1 for was, now in zip(base["per_case"], tuned["per_case"]) if was and not now)
     c = sum(1 for was, now in zip(base["per_case"], tuned["per_case"]) if not was and now)
     chi2, significant = _mcnemar(b, c)
     print(f"McNemar: b(regressed)={b}  c(improved)={c}  chi2={chi2:.3f}  significant@0.05={significant}")
 
-    # Save per-case rows for BOTH runs — not just the printed aggregate. If this run's numbers
-    # ever need re-checking later (a different rubric, a disputed claim), the rows make that
-    # possible without a second GPU run; the aggregate alone would not.
+    # Per-case rows for both runs, so the numbers can be re-checked without a second GPU run.
     compare_path = Path("data/eval/extractor_finetune_compare.jsonl")
     compare_path.parent.mkdir(parents=True, exist_ok=True)
     with open(compare_path, "w") as f:

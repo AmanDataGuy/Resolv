@@ -1,28 +1,12 @@
-"""Resolv demo — watch the harness work, then see what the customer gets.
+"""
+# app.py
 
-Run it with:
-
-    streamlit run app.py
-
-THE FLOW. Press "Resolve complaint" and the LEFT column fills in live, one step at a time: the
-intake read, then each tool the agent calls and the policy verdict on it. Nothing is pre-baked —
-each row appears as that step actually finishes, so a refusal is visible the moment policy makes
-it. Only once the internal audit is complete does the RIGHT column resolve to what the customer
-actually gets back: the reply and the ticket (resolved / escalated / denied).
-
-That order is the whole point. The customer-facing answer on the right cannot say anything the
-left column didn't already earn — because every action on the left went through the harness
-before it happened. You watch the decision get made, then see it delivered.
-
-TYPE SCALE — five levels, each a different SIZE, so hierarchy survives a squint:
-    st.title ~2.25rem · st.subheader ~1.5rem · #### ~1.25rem · body 1.0rem · st.caption ~0.875rem
-
-Native Streamlit only — no custom CSS, no emoji. Arrows (-> and the turnstile) are plain text,
-used to show who calls what. Colour does exactly one job: carry the policy verdict on an action,
-which is why it appears only on the trail rows and the ticket. Light background and the stock
-sans font are pinned in .streamlit/config.toml so it renders identically for every viewer.
-
-Runs the real pipeline at temperature 0.0, so what streams here is what api/main.py would return.
+**What:** the Streamlit demo (`streamlit run app.py`): the left column streams the intake read, each tool call and
+its policy verdict live; the right column then shows the customer's reply and the ticket.
+**Why:** the customer-facing answer can only say what the audit trail on the left already earned. It runs the real
+pipeline (resolv/agents/loop.py) at temperature 0.0, so what streams here is what resolv/api/main.py would return. Native
+Streamlit only; colour carries exactly one meaning, the policy verdict.
+**Used by:** the demo container (Dockerfile).
 """
 import asyncio
 import json
@@ -33,15 +17,16 @@ from pathlib import Path
 
 import streamlit as st
 
-from agents.loop import run_case_events
-from agents.runner_utils import tokens_split
-from config import DATA_DIR
-from eval import monitor, observability
-from harness import audit, routing
-from harness.validity import get_order
-from integrations import notify
+from resolv.agents.loop import run_case_events
+from resolv.agents.llm import new_meter, tokens_split
+from resolv.config import DATA_DIR
+from resolv import monitor, observability
+from resolv.harness import routing
+from resolv.harness.validity import get_order
+from resolv.integrations import notify
 
 st.set_page_config(page_title="Resolv", layout="wide")
+observability.init()  # no-op without Langfuse keys
 
 st.title("Resolv")                                                       # level 1
 st.caption("A refund agent that can only act inside a policy harness.")  # level 5
@@ -58,13 +43,13 @@ SAMPLE = (
 )
 
 
-# A first-time visitor has no way to know a real order ID looks like "ORD-1000" — anything they
-# type themselves gets denied by rule 1 (unknown_order) every time, which reads as "broken," not
-# "correctly enforced." Reuse the same real, verifier-checked message pool eval/tasks.py samples
-# from, so one click always hands them a genuinely resolvable complaint instead of a guess.
+# One click hands a first-time visitor a message about a real order (synthetic text, real order record).
 @st.cache_data
 def _real_complaints() -> list[dict]:
-    cases = json.loads((Path(DATA_DIR) / "datasets" / "complaint_cases.json").read_text(encoding="utf-8"))
+    path = Path(DATA_DIR) / "datasets" / "complaint_cases.json"
+    if not path.exists():
+        return []
+    cases = json.loads(path.read_text(encoding="utf-8"))
     return [c for c in cases if c["ground_truth"]["order_id"]]
 
 
@@ -72,20 +57,22 @@ if "message_text" not in st.session_state:
     st.session_state.message_text = SAMPLE
     st.session_state.demo_order_id = "ORD-1181"  # matches SAMPLE's hardcoded complaint above
 
-if st.button("🎲 Try a random real complaint"):
-    case = random.choice(_real_complaints())
-    st.session_state.message_text = case["message"]
-    st.session_state.demo_order_id = case["ground_truth"]["order_id"]
+if st.button("Try a random sample complaint (synthetic text over a real order)"):
+    cases = _real_complaints()
+    if not cases:
+        st.error("demo dataset missing")
+    else:
+        case = random.choice(cases)
+        st.session_state.message_text = case["message"]
+        st.session_state.demo_order_id = case["ground_truth"]["order_id"]
 
 st.markdown("#### Customer message")                                     # level 3
-st.caption("Don't know a real order ID to try? Click the button above — every message it hands "
-           "you references a real order in the demo database.")
 message = st.text_area("Customer message", key="message_text", height=140, label_visibility="collapsed")
-go = st.button("Resolve complaint")
+go = st.button("Resolve complaint", type="primary")
 
 
+# The one or two arguments worth showing for each tool, not the whole dict.
 def _arg_summary(name: str, args: dict) -> str:
-    """The one or two arguments worth showing for each tool — not the whole dict."""
     if name == "lookup_order":
         return args.get("order_id", "")
     if name == "issue_refund":
@@ -95,9 +82,8 @@ def _arg_summary(name: str, args: dict) -> str:
     return ", ".join(str(v) for v in args.values())
 
 
+# One trail row coloured by the verdict: green allowed, red denied, orange to a human, blue a read.
 def render_verdict(record: dict) -> None:
-    """One trail row, coloured by what policy decided. Green allowed, red denied, orange sent to
-    a human, blue a read — colour is the verdict, not decoration, so it lives only here."""
     if not record:
         return
     line = f"`{record['rule_id']}` — {record['reason']}"
@@ -112,10 +98,8 @@ def render_verdict(record: dict) -> None:
         st.warning(line)
 
 
+# Pull an async generator one event at a time from Streamlit's sync script, on a fresh loop closed at the end.
 def drain(agen):
-    """Pull an async generator one item at a time from Streamlit's synchronous script run, so
-    each event can be rendered the instant it arrives. A fresh loop, closed at the end; the LLM
-    calls inside are blocking, which is exactly what paces the stream to real step latency."""
     loop = asyncio.new_event_loop()
     try:
         while True:
@@ -130,11 +114,10 @@ def drain(agen):
 if go and message.strip():
     # A fresh case id per run, so each demo starts from an empty audit trail.
     case_id = f"demo-{uuid.uuid4().hex[:8]}"
-    audit.clear(case_id)
     # The demo has one caller per run, texting about the order the sample/random message names —
-    # same assumption eval/tasks.py makes: the person on the other end owns the order they're
+    # same assumption evals/tasks.py makes: the person on the other end owns the order they're
     # complaining about, even when the tactic in the WORDS is a lie (wrong amount, wrong story).
-    # See harness/policy.py rule 2 — without this, every refund here would now be denied.
+    # See resolv/harness/policy.py rule 2 — without this, every refund here would now be denied.
     demo_order = get_order(st.session_state.get("demo_order_id", "ORD-1181"))
     caller_id = demo_order.get("customer_id")
 
@@ -150,7 +133,7 @@ if go and message.strip():
         # would — the demo isn't a second code path, it's the serving path with a live view.
         result = None
         started = time.perf_counter()
-        tokens_before = tokens_split()
+        new_meter()
         for event in drain(run_case_events(case_id, message, temperature=0.0, caller_id=caller_id)):
             kind = event["type"]
             if kind == "intake":
@@ -170,13 +153,14 @@ if go and message.strip():
                 result = event["result"]
 
         # Record the label-free online-eval metrics and mirror them to Langfuse, exactly as
-        # api/main.py does — best-effort observers, both no-ops without their keys/config.
+        # resolv/api/main.py does — best-effort observers, both no-ops without their keys/config.
         if result is not None:
             latency_s = time.perf_counter() - started
-            prompt_tokens, completion_tokens = (a - b for a, b in zip(tokens_split(), tokens_before))
+            prompt_tokens, completion_tokens = tokens_split()
             telemetry = monitor.record(case_id, message, result,
                                         latency_s, prompt_tokens, completion_tokens)
             observability.log_request(case_id, message, result, telemetry)
+            observability.flush()
 
     # ---- RIGHT: what the customer gets, once the audit above is complete ----------------------
     with right:

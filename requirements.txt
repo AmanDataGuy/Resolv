@@ -1,27 +1,17 @@
-# Python dependencies actually imported by the running code.
-google-adk
-fastapi
-uvicorn[standard]
-pydantic
-python-dotenv
-litellm
-tqdm              # eval sweep progress bar (eval/runner.py)
-langfuse>=2,<3    # OPTIONAL online-eval tracing (eval/observability.py); no-op without keys
-deepeval==4.2.0   # OPTIONAL, only for eval/quality.py's GEval tone metric.
-                  # PINNED: unpinned, CI resolved a newer release whose bundled (unused) OpenAI/
-                  # Azure model wrapper eagerly imports `langchain` without declaring it as a real
-                  # dependency, crashing `pytest -q` on a fresh install with
-                  # ModuleNotFoundError: No module named 'langchain'. This exact version doesn't
-                  # hit that import path -- verified locally (no `langchain` reference in its
-                  # deepeval/models/llms/openai_model.py at all). We only ever use GEval with our
-                  # own custom judge (eval/deepeval_model.py), never deepeval's OpenAI/Azure
-                  # wrappers, so this is a packaging bug in deepeval, not a real need of ours.
-pandas            # scripts/gen_complaint_cases.py reads the raw Olist CSVs
-# numpy/pyarrow pinned to a known-good pandas build. (Legacy from the removed torch stack;
-# kept because the newer numpy streamlit pulls unpinned has caused pyarrow conflicts here.)
-numpy==2.1.3
-pyarrow>=17,<19
-streamlit         # demo UI (app.py)
-pytest
-pytest-asyncio
-ruff
+# Runtime dependencies (the API, the agent loop and the Streamlit demo). Exact pins; check a
+# package's release notes before bumping it. Eval-only deps: requirements-eval.txt. Tools: requirements-dev.txt.
+google-adk==2.3.0
+fastapi==0.139.0
+uvicorn[standard]==0.50.0
+pydantic==2.12.3
+python-dotenv==1.2.2
+litellm==1.91.0
+openai==2.44.0
+httpx==0.28.1
+langfuse==4.15.6          # tracing; no-op without keys (resolv/observability.py). 4.16+ needs otel>=1.45, adk caps it at 1.42.1
+opentelemetry-api==1.42.1
+opentelemetry-sdk==1.42.1
+streamlit==1.59.2         # demo UI (app.py)
+numpy==2.1.3              # numpy/pyarrow pinned to a known-good pandas/streamlit build
+pyarrow==18.1.0
+tqdm==4.68.3
