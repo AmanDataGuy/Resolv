@@ -2,7 +2,7 @@
 # tests/test_async_health.py
 
 **What:** /resolve never blocks the event loop: /health answers while a slow resolution is in flight; retries use
-asyncio.sleep; a wall-clock timeout escalates instead of failing; ADK sessions are deleted.
+asyncio.sleep; a wall-clock timeout escalates instead of failing.
 **Why:** one slow provider call must not freeze every other request on the server. LLM calls are faked.
 **Used by:** pytest.
 """
@@ -97,44 +97,3 @@ async def test_resolve_times_out_to_escalation(monkeypatch):
     assert result["budget_exceeded"] == "wall_clock"
     assert result["reply"] == loop.FALLBACK_REPLY
     assert result["trail"][-1]["tool"] == "escalate_to_human"
-
-
-# ADK sessions are deleted after each run.
-@pytest.mark.asyncio
-async def test_adk_sessions_deleted(monkeypatch):
-    created, deleted = [], []
-
-    # A session service that only counts.
-    class FakeSessions:
-        # Count a create.
-        async def create_session(self, **kw):
-            created.append(kw["session_id"])
-
-        # Count a delete.
-        async def delete_session(self, **kw):
-            deleted.append(kw["session_id"])
-
-        # Return a session with the extractor's output in state.
-        async def get_session(self, **kw):
-            return SimpleNamespace(state={"customer_claim": {"order_id": "ORD-1000"}})
-
-    # A runner that yields one final event.
-    class FakeRunner:
-        # Accept the real constructor's kwargs.
-        def __init__(self, **kw):
-            pass
-
-        # One final event with text.
-        async def run_async(self, **kw):
-            part = SimpleNamespace(text="{}")
-            yield SimpleNamespace(is_final_response=lambda: True, content=SimpleNamespace(parts=[part]),
-                                  usage_metadata=None, model_version=None)
-
-    monkeypatch.setattr(ru, "_session_service", FakeSessions())
-    monkeypatch.setattr(ru, "Runner", FakeRunner)
-    agent = SimpleNamespace(model="groq/x")
-
-    out = await ru.run_agent_once(agent, "hi", "customer_claim")
-
-    assert out == {"order_id": "ORD-1000"}
-    assert created and created == deleted

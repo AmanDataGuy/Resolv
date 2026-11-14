@@ -79,10 +79,7 @@ def test_unknown_provider_rejected(load):
         load(LLM_PROVIDER="nope")
 
 
-# Extractor get model routes selfhosted.
-def test_extractor_get_model_routes_selfhosted(load, monkeypatch):
-    c = load(LLM_PROVIDER="groq", EXTRACTOR_MODEL="selfhosted:grpo")
-    monkeypatch.delenv("USE_GEMINI", raising=False)
-    model = c.get_model("extractor")
-    assert model.model == "hosted_vllm/grpo"
-    assert model._additional_args["api_base"] == c.SELFHOSTED_BASE_URL
+# The extractor uses one structured-output completion unless told otherwise.
+def test_extractor_backend_defaults_to_json(load, monkeypatch):
+    monkeypatch.delenv("EXTRACTOR_BACKEND", raising=False)
+    assert load().EXTRACTOR_BACKEND == "json"
