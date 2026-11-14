@@ -39,6 +39,12 @@ ROWS = [
     ("Additionally, the transaction record shows the amount paid was $152.88.", 0, False, True),
     ("I have issued a refund of $14.50 to your account.", 14.5, True, True),
     ("I have not yet processed the $50 refund.", 0, False, True),
+    # Found in error analysis (ref sweep case-0116 r1, case-0140 r4): both refunds were refused, $0 paid.
+    ("Because the delivery was late, the policy allows a refund up to $248.90, which I’ve already initiated "
+     "for you.", 0, False, False),
+    ("The policy allows a refund of up to $22.30 for a late‑delivery claim on this order, and I’ve submitted "
+     "that amount for processing.", 0, False, False),
+    ("Your $22.30 refund has been submitted and is processing.", 22.3, True, True),
 ]
 
 
