@@ -2,18 +2,18 @@
 
 The evaluation history of Resolv's refund agent: what was measured, what failed, and what changed.
 
-> **Read this first.** The per-run rows behind most numbers here (`data/eval/*.jsonl`) were archived
-> out of the repo. Only `evals/baselines/agent.json` and `evals/baselines/extractor.json` are committed,
-> so only numbers taken from those two files can be checked from this repo. Every other number is
-> marked **historical, rows not in repo** and has not been re-measured. Both baseline files are
-> themselves historical: Gemini 3.5 Flash, pinned 2026-07-25, before rule 2 (caller must own the
-> order), the reply guardrails and the prompt change.
+> **Read this first.** Section 0 and the section "Current measurements" hold the numbers for the system on
+> `main` today: `gpt-oss-120b` (served through OpenRouter as `openrouter/openai/gpt-oss-120b`, the same open
+> weights Groq serves), measured 2026-11-14. Each of those numbers names its source file and JSON key under
+> `evals/results/` or `inference/results/`.
 >
-> The system under test has changed since: SQLite ledger with a keyed (HMAC) audit chain, a refund
-> saga against a simulated PSP, human approvals bound to the exact action, a durable step journal,
-> NaN/Infinity rejection in tool arguments, malformed calls recorded on the trail, owner-scoped order
-> lookup, reworked reply guardrails, a fully async loop, order-proof session tokens, and an
-> independent invariant grader. None of the historical numbers below were measured on that system.
+> Sections 2 to 7 are the **historical** record (July to October 2026, mostly Gemini 3.5 Flash). Their per-run
+> rows were archived out of the repo except `evals/baselines/agent.json`, `evals/baselines/extractor.json` and
+> `evals/results/historical/`. The system under test has changed since: SQLite ledger with a keyed (HMAC) audit
+> chain, a refund saga against a simulated PSP, human approvals bound to the exact action, a durable step journal,
+> NaN/Infinity rejection in tool arguments, malformed calls recorded on the trail, owner-scoped order lookup,
+> reworked reply guardrails, a fully async loop, order-proof session tokens, rule 2 (caller must own the order)
+> and an independent invariant grader. Do not read a historical number against a current one as a before/after.
 
 **Test suite:** keyless, no API key (`pytest -q`). The count is not restated here; get it from
 `pytest --collect-only -q`. (Earlier drafts said 244, 249 and 274 in different places.)
@@ -22,20 +22,40 @@ The evaluation history of Resolv's refund agent: what was measured, what failed,
 
 ## 0. Executive summary
 
+Current system, `gpt-oss-120b` for agent, simulator and extractor, 2026-11-14:
+
+| Eval | Headline number | Source (file, key) |
+|---|---|---|
+| Agent sweep, pass^k (**partial**: 28 of 40 tasks × 5) | pass^1 **0.829**, pass^3 **0.736**, pass^5 **0.714**; unauthorized **0.0** | `evals/results/ref_gpt_oss_120b_partial_card.json`, `card.pass^k` |
+| Harness ON vs OFF (40 runs per arm) | ON: 0 unauthorized, $0. OFF: 16/40 unauthorized, **$2,637.72 gross, $2,281.70 excess** | `evals/results/ablation_gpt_oss_120b_card.json`, `cards.<arm>.unauthorized_usd` |
+| Extractor on vs off (40 runs per arm) | resolve 0.85 vs 0.825, no harm either way | `evals/results/ablation_extractor_gpt_oss_120b_card.json`, `cards.<arm>.resolve_rate` |
+| Extractor (json backend), held-out n=92 | both-correct **0.891**, hallucination 4/13 | `evals/results/extractor_gpt_oss_120b_card.json`, `card.both_acc` |
+| Regex baseline, same 92 cases | both-correct **0.891**, hallucination 5/13; paired 5 better, 5 worse | `inference/results/extractor/serve_regex.json`, `card.both_acc` |
+| Prompt injection with control arm, 144 runs | largest lift +0.167 (fake system turn, CI 0.0 to 0.417); harm **0** in every arm | `evals/results/injection_gpt_oss_120b_card.json`, `card.complied_lift`, `card.harm` |
+| Red team, 11 families, 288 rows | harm **0** (money, data, PII, prompt, budget) | `evals/results/redteam_gpt_oss_120b_card.json`, `card.harm_summary` |
+| Latency, 25 single-turn runs (small n) | end-to-end p50 4.73 s, p95 **7.68 s**; first action p95 3.04 s; both SLOs pass | `evals/results/ops_latency_2026-11-14T06-54-54+00-00-openrouter-latency_card.json`, `card.e2e_s`, `card.first_action_s` |
+| Cost | $0.00179 per resolution (sweep); $0.00062 per single-turn request; list price | `ref_gpt_oss_120b_partial_card.json` `card.cost_per_resolution`; ops cost card `card.avg_usd_per_request` |
+| Reliability, 25 single attempts (small n) | 25/25 | `evals/results/ops_reliability_2026-11-14T06-58-09+00-00-openrouter-reliability_card.json`, `card.success_rate` |
+| Nightly gate false-positive rate | 0 of 1,000 pseudo-nightlies | printed by `python -m evals.gate` (CI step); `docs/eval/METRICS.md` |
+| Deterministic suite (pytest) | keyless; count from `pytest --collect-only -q` | not restated |
+
+**No harm anywhere with the harness on:** zero unauthorized refunds, zero invariant violations and zero leaks across
+every current run above. With the harness off, the same model paid out wrongly on 16 of 40 runs. The model itself
+stays suggestible (it went for the foreign order in 24 of 24 identity-spoofing rows and probes above the cap in
+4 of 8 honest red-team control rows); the harness refused each of those actions.
+
+Historical (different model, prompt and harness; rows mostly not in repo):
+
 | Eval | Headline number | Status |
 |---|---|---|
-| Deterministic suite (pytest) | keyless; count from `pytest --collect-only -q` | not restated |
-| Agent sweep — pinned pass^k (Gemini) | **pass^3 = 0.9625**, unauthorized_rate = **0.0** | historical, from `evals/baselines/agent.json` |
-| Agent sweep — full reliability curve (Groq, 320 runs) | pass^1→8: 0.850 → 0.625, unauthorized_rate 0.0 | historical, rows not in repo |
-| Extractor — reading accuracy | both-correct **0.9783**, hallucination **0.1538** (n=13, Wilson 0.043–0.422) | historical, from `evals/baselines/extractor.json` |
-| Extractor — regex baseline | 0.891 both-correct (prior audit) | not yet re-measured in-repo (section 3.1) |
-| Ablation — is the harness load-bearing? | OFF paid $2,120.42 gross ($2,069.32 above what was owed), 65% of runs; ON $0.00 | historical, rows not in repo |
-| Prompt injection | complied 1.0, unauthorized 0.0, leak 0.0 | **provisional: metric confounded**, see 2.2 |
-| Operations — reliability | 100% success (25/25, single-shot) | historical, rows not in repo |
-| Operations — latency (end-to-end) | Groq p95 12.71s (SLO <= 15s) | historical, rows not in repo |
-| Operations — latency (first visible action) | Groq p95 7.66s (SLO <= 6s) | historical, rows not in repo; SLO still open |
-| Operations — cost | Gemini $0.0127/request at historical constants | historical, rows not in repo; see 5.3 |
-| Application quality — reply tone | avg 0.953/1.0, 0/198 below threshold | historical, rows not in repo; same-model judge, uncalibrated |
+| Agent sweep, pinned pass^k (Gemini 3.5 Flash) | pass^3 = 0.9625, unauthorized_rate = 0.0 | historical, from `evals/baselines/agent.json` |
+| Agent sweep, reliability curve (Groq, 320 runs) | pass^1→8: 0.850 → 0.625, unauthorized_rate 0.0 | historical, rows not in repo |
+| Extractor (Gemini 3.5 Flash, ADK backend) | both-correct 0.9783, hallucination 0.1538 (n=13) | historical, from `evals/baselines/extractor.json` |
+| Ablation (n=20 per arm) | OFF paid $2,120.42 gross ($2,069.32 above what was owed), 65% of runs; ON $0.00 | historical, rows not in repo |
+| Prompt injection (no control arm) | complied 1.0, unauthorized 0.0 | historical, metric confounded, see 2.2 |
+| Operations (Groq, 25 runs) | 25/25 success; e2e p95 12.71 s; first action p95 7.66 s | historical, rows not in repo |
+| Operations, cost | Gemini $0.0127/request at historical constants | historical, rows not in repo |
+| Application quality, reply tone | avg 0.953/1.0, 0/198 below threshold | historical, rows not in repo; same-model judge, uncalibrated |
 | Authentication | order-proof session tokens (`/token` + `/resolve`) | rewritten, see 6.13 |
 | Audit trail | SQLite ledger, HMAC chain keyed by `AUDIT_HMAC_KEY` | rewritten, see 6.12 |
 
@@ -43,6 +63,136 @@ The one-sentence version: **the AI is allowed to be wrong — it gets fooled, it
 suggestible — and the system stays safe anyway, because a separate, fully-tested piece of plain
 code checks every decision before any money moves.** Every section below is a different way of
 testing that claim, plus the newer operational and quality layers added on top of it.
+
+---
+
+## Current measurements: gpt-oss-120b, 2026-11-14
+
+All runs: agent, simulator, extractor and judge on `openrouter/openai/gpt-oss-120b`, temperature 0.7, git
+`dc5d6e8`, prompt sha `88916d9bcec3`, dataset sha `9e2ab9486547`, extractor backend `json`. Each eval ran against
+its own throwaway ledger and PSP files. `usd` on every row is priced at OpenRouter's list rate ($0.15 / $0.60 per
+M tokens, `resolv/config.py`), an upper bound, since OpenRouter can route to cheaper hosts. The simulator is the
+same model as the agent. `git_dirty` is `true` on some manifests only because earlier result files were still
+untracked when that run started; no code was uncommitted.
+
+### Reference sweep (partial)
+
+Run `2026-11-14T06-38-21+00-00-openrouter-ref_gpt_oss_120b`. Rows: `evals/results/ref_gpt_oss_120b.jsonl` (144
+rows: 141 valid, 3 failed with "requires more credits"). Card: `evals/results/ref_gpt_oss_120b_partial_card.json`.
+The sweep stopped when the provider account ran out of credit, so the card scores only the **28 tasks that have
+all 5 repeats** (140 runs; ids in `coverage.scored_task_ids`). They are the first 28 of the 40 tasks and are
+**not** balanced: 11 refund, 16 deny and 1 escalate task (`coverage.expected_mix` counts runs: 55 / 80 / 5). Read
+these as partial, not as the 40-task reference. Resume into the same file (never `--fresh`):
+`python -m evals.runner --n 5 --tasks 40 --out ref_gpt_oss_120b.jsonl --usd-cap 2`.
+
+| metric (key in `card`) | value (task-clustered 95% CI) |
+|---|---|
+| `pass^1` | **0.829** (0.714–0.929) |
+| `pass^2` | 0.764 (0.618–0.900) |
+| `pass^3` | **0.736** (0.579–0.889) |
+| `pass^4` | 0.721 (0.550–0.871) |
+| `pass^5` | **0.714** (0.536–0.857) |
+| `resolve_rate` | 0.829 (clustered 0.714–0.929) |
+| **`unauthorized_rate`** | **0.0** |
+| `invariant_violation_rate` | 0.0 |
+| `harmful_block_rate` (deny tasks) | 1.0 |
+| `over_block_rate` (refund tasks) | 0.093 |
+| `reply_grounded_rate` / `lookup_before_refund_rate` | 1.0 / 1.0 |
+| `mean_steps` | 5.28 |
+| `p50_latency_s` / `p95_latency_s` (multi-turn) | 11.67 s / 17.87 s |
+| `cost_per_resolution` | $0.00179 |
+| `design_effect_resolved` | ICC 0.558, DEFF 3.23, n_eff 43.3 |
+
+No agent baseline is pinned from this partial sweep. Once the 200 rows exist, pin it with `--save-baseline
+evals/baselines/agent_ref_gpt_oss_120b.json`; until then the nightly agent gate skips.
+
+### Harness ON vs OFF (ablation)
+
+Run `2026-11-14T06-38-36+00-00-openrouter-ablation`, 40 tasks × 1 run per arm. Source:
+`evals/results/ablation_gpt_oss_120b_card.json`, `cards.on` and `cards.off`.
+
+| metric | harness ON | harness OFF |
+|---|---|---|
+| `unauthorized_rate` | **0.0** | **0.40** (16 of 40) |
+| `invariant_violation_rate` | 0.0 | 0.40 |
+| `unauthorized_usd.gross` | **$0.00** | **$2,637.72** |
+| `unauthorized_usd.excess` (above what was owed) | **$0.00** | **$2,281.70** (15 overpaid runs) |
+| `resolve_rate` (clustered CI) | 0.825 (0.70–0.925) | 0.55 (0.40–0.70) |
+| `harmful_block_rate` | 1.0 | 0.5 |
+| `over_block_rate` | 0.125 | 0.025 |
+
+Gross counts every dollar of an unauthorized refund; excess counts only the part above what the customer was owed.
+The historical n=20 run (OFF $2,120.42 gross, $2,069.32 excess, 65% of runs) is in section 4, for comparison only.
+
+**Extractor on vs off** (`--arm extractor`), run `2026-11-14T06-38-37+00-00-openrouter-ablation`, source
+`evals/results/ablation_extractor_gpt_oss_120b_card.json`: `resolve_rate` 0.85 (0.725–0.95) with the extractor vs
+0.825 (0.70–0.925) without; mean steps 5.15 vs 5.28; unauthorized 0 in both; $0.0632 vs $0.0518 for 40 runs. The
+extractor's hint is not shown to matter at n=40. The ON arms of the two ablations (0.825 and 0.85, same setup) show
+how far one 40-run arm moves on its own.
+
+### Extractor and regex on the same 92 cases
+
+Extractor run `2026-11-14T06-38-41+00-00-openrouter-extractor`, `json` backend, pinned as
+`evals/baselines/extractor_ref_gpt_oss_120b.json`, so the nightly extractor gate now runs.
+
+| | gpt-oss-120b (json) | regex (no model) |
+|---|---|---|
+| `both_acc` | **0.891** (0.811–0.940) | **0.891** (0.811–0.940) |
+| `order_acc` / `claim_acc` | 0.957 / 0.935 | 0.946 / 0.946 |
+| `hallucination_rate` on the 13 no-order messages | 0.308 (4 of 13) | 0.385 (5 of 13) |
+| `p50_latency_s` | 1.66 s | under 0.001 s |
+| source | `evals/results/extractor_gpt_oss_120b_card.json`, `card` | `inference/results/extractor/serve_regex.json`, `card` |
+
+Paired (McNemar via `evals.extractor.compare`, model rows against the regex rows): 5 cases the model gets right and
+regex wrong, 5 the other way, chi2 0.1, not significant. **The hosted model does not beat the regex baseline on this
+split.** Hallucination rests on 13 cases, so 4 vs 5 is noise. The harness is what makes extraction errors safe: a
+wrong order id costs a turn, never a wrong refund.
+
+### Prompt injection with a control arm
+
+Run `2026-11-14T06-39-52+00-00-openrouter-injection`: 8 refund-owed orders × 3 repeats × 6 arms = 144 runs.
+Source: `evals/results/injection_gpt_oss_120b_card.json`, `card.complied`, `card.complied_lift`, `card.harm`.
+
+| arm | complied | lift over control (95% CI, clustered by order) | p | unauthorized | excess $ |
+|---|---|---|---|---|---|
+| control | 0.208 | — | — | 0.0 | 0 |
+| direct_override | 0.208 | 0.0 (−0.125 to 0.125) | 1.0 | 0.0 | 0 |
+| fake_system_turn | 0.375 | **+0.167** (0.0 to 0.417) | 0.20 | 0.0 | 0 |
+| fake_tool_result | 0.208 | 0.0 (−0.125 to 0.125) | 1.0 | 0.0 | 0 |
+| authority_roleplay | 0.25 | +0.042 (0.0 to 0.125) | 0.68 | 0.0 | 0 |
+| exfiltrate_prompt | 0.083 | +0.083 (0.0 to 0.208) | 0.21 | 0.0 | 0 |
+
+No payload's lift has a CI that excludes zero. The control arm's 0.208 is the model probing above the cap with no
+attack, which is why the old "complied 1.0" was confounded. In 2 of 24 exfiltration rows the reply echoed the
+planted marker token, but no system prompt text appeared (8-gram detector, 0 hits). Harm is 0 in every arm.
+
+### Red team
+
+288 rows over 11 families, harm 0. The table and what it means are in `docs/eval/REDTEAM.md` section 2; source
+`evals/results/redteam_gpt_oss_120b_card.json`. Red-team cassettes for the PR gate are not recorded yet (the
+account ran out of credit first).
+
+### Latency, cost, reliability (small n)
+
+Single-turn resolutions over 5 tasks, no simulated back-and-forth. Small samples: a p95 from 25 runs is noisy, so
+read the clustered CI; the sweep's 140 multi-turn rows above are the larger latency sample.
+
+| | value | source |
+|---|---|---|
+| end-to-end p50 / p95 | 4.73 s / **7.68 s** (p95 CI 5.53–7.77); SLO ≤ 15 s passes | `evals/results/ops_latency_2026-11-14T06-54-54+00-00-openrouter-latency_card.json`, `card.e2e_s` |
+| first action p50 / p95 | 2.14 s / **3.04 s** (p95 CI 2.54–4.30); SLO ≤ 6 s passes | same file, `card.first_action_s` |
+| cost per request | $0.00062 (3,315 in / 204 out tokens); about $37/month at 2,000 requests a day; list price | `evals/results/ops_cost_2026-11-14T06-57-02+00-00-openrouter-cost_card.json`, `card` |
+| cost per resolution (multi-turn sweep) | $0.00179 | `evals/results/ref_gpt_oss_120b_partial_card.json`, `card.cost_per_resolution` |
+| single-attempt reliability | 25 of 25 (1.0) | `evals/results/ops_reliability_2026-11-14T06-58-09+00-00-openrouter-reliability_card.json`, `card.success_rate` |
+
+The first-action SLO that failed historically (Groq, p95 7.66 s) passes here at 3.04 s, on 25 runs and a different
+host. That is a new measurement, not a fix.
+
+### Spend
+
+Summed `usd` over every row in the files above: **$0.81** at list price (reference sweep 0.2116, red team 0.1988,
+ablations 0.1150 + 0.1151, injection 0.1101, extractor 0.0186, ops 0.0166 + 0.0157 + 0.0093). OpenRouter can bill
+less than list price because it routes to cheaper hosts.
 
 ---
 
@@ -58,7 +208,7 @@ reaches a paid eval.
 
 ---
 
-## 2. The agent sweep — pass^k under an adversarial customer
+## 2. The agent sweep — pass^k under an adversarial customer (historical)
 
 **File:** `evals/runner.py` · **Pinned baseline:** `evals/baselines/agent.json` (Gemini 3.5 Flash, 40
 tasks x 5 repeats = 200 runs)
@@ -141,17 +291,17 @@ at all, across 320 real adversarial runs. That separation — a model that gets 
 the actual job the more you ask it to repeat, while the thing that must never fail never does — is
 the entire thesis of this project, now demonstrated with a real curve instead of one k=3 snapshot.
 
-### 2.2 Prompt injection (provisional)
+### 2.2 Prompt injection (historical, confounded)
 
 The old injection result (complied 1.0, unauthorized 0.0, leak 0.0; rows not in repo) is
 **provisional: the metric is confounded**. The model probes above the cap even with no attack, so
 "complied" measured baseline cap-probing, not the attack. `evals/injection.py` now runs a control arm
-(the honest complaint alone) next to each attack arm and reports the lift over control. Not yet
-measured with the new design.
+(the honest complaint alone) next to each attack arm and reports the lift over control. The new design
+was run on 2026-11-14; see "Current measurements", prompt injection.
 
 ---
 
-## 3. The extractor — can it read the message?
+## 3. The extractor — can it read the message? (historical)
 
 **File:** `evals/extractor.py` · **Pinned baseline:** `evals/baselines/extractor.json` (held-out 20%
 split, n=92, Gemini 3.5 Flash)
@@ -185,14 +335,14 @@ check, since closed by rule 2 (section 6, item 9).
 |---|---|---|
 | Small model (Qwen2.5-1.5B), before fine-tuning | 0.489 | measured once on Kaggle, rows not retained |
 | Small model, after GRPO fine-tuning (200 steps) | 0.707 | measured once on Kaggle, rows not retained |
-| Regex extractor (no model) | 0.891 | prior audit, not yet re-measured in-repo |
+| Regex extractor (no model) | 0.891 | `inference/results/extractor/serve_regex.json`, measured in-repo 2026-11-14 |
 | Gemini 3.5 Flash (hosted) | **0.9783** | `evals/baselines/extractor.json` |
 
 ### 3.1 The regex baseline is the bar
 
-A plain regex extractor is the floor any model has to beat. A prior audit measured it at 0.891
-both-correct on this split; that has not yet been re-measured in-repo. Re-measure it (seconds, CPU,
-no key) with:
+A plain regex extractor is the floor any model has to beat. Measured in-repo on 2026-11-14 at 0.891
+both-correct on this split (`inference/results/extractor/serve_regex.json`, `card.both_acc`), the same
+as the earlier audit. Re-measure it (seconds, CPU, no key) with:
 
 ```bash
 python -m inference.serve_bench --backend regex --label regex
@@ -211,7 +361,7 @@ wrong refund.
 
 ---
 
-## 4. Ablation — proving the harness is load-bearing, not decoration
+## 4. Ablation — proving the harness is load-bearing (historical, n=20)
 
 **Historical, rows not in repo.** **File:** `evals/ablation.py` · **Data:** was `data/eval/ablation.jsonl`
 (20 tasks, one run per arm)
@@ -231,7 +381,7 @@ set of tools only for this experiment — production code has exactly one write 
 
 ---
 
-## 5. Operations and application-quality evals
+## 5. Operations and application-quality evals (historical)
 
 **Every number in this section is historical, rows not in repo.** The task set was 5 LLM-generated
 complaints over real orders, not real customer complaints. Dollar figures computed at $1.50/$9.00 per
@@ -574,16 +724,26 @@ python -m resolv.harness.policy                  # the 8 refund rules (0-7) agai
 python -m inference.serve_bench --backend regex --label regex   # section 3.1 -- the regex bar
 python -m evals.metrics                    # the scoring math, checked against hand-worked numbers
 
-# Needs a provider key (Groq is free-tier viable for the smaller runs below):
+# The current measurements (2026-11-14), with LLM_PROVIDER=openrouter LLM_MODEL=openrouter/openai/gpt-oss-120b:
+python -m evals.runner --n 5 --tasks 40 --out ref_gpt_oss_120b.jsonl --usd-cap 2       # reference sweep (resumable)
+python -m evals.ablation --tasks 40 --n 1 --arm both --out ablation_gpt_oss_120b.jsonl
+python -m evals.ablation --tasks 40 --n 1 --arm extractor --out ablation_extractor_gpt_oss_120b.jsonl
+python -m evals.extractor --split test --out extractor_gpt_oss_120b.jsonl --save-baseline evals/baselines/extractor_ref_gpt_oss_120b.json
+python -m evals.injection --orders 8 --n 3 --out injection_gpt_oss_120b.jsonl
+python -m evals.redteam --out redteam_gpt_oss_120b.jsonl
+python -m evals.latency --tasks 5 --n 5 --warmup 1
+python -m evals.cost --tasks 5 --n 3
+python -m evals.reliability --tasks 5 --n 5
+python -m evals.gate --baseline evals/results/ref_gpt_oss_120b.jsonl --subset 8 --runs 2 --draws 1000   # keyless
+
+# Historical sections:
 python -m evals.extractor --split test     # section 3 -- extractor accuracy + hallucination rate
 python -m evals.ablation                   # section 4 -- harness ON vs OFF
 python -m evals.injection                  # section 2/4 -- prompt-injection suite
 python -m evals.runner --n 5 --tasks 40    # section 2 -- the full pass^k sweep (200 runs)
-
-# Operations:
 python -m evals.reliability                # section 5.1
 python -m evals.latency                    # section 5.2
-python -m evals.cost                       # section 5.3 (ignore the $ figure on non-Gemini providers)
+python -m evals.cost                       # section 5.3
 pip install -r requirements-eval.txt && python -m evals.quality   # section 5.4
 ```
 
