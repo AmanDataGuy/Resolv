@@ -70,7 +70,7 @@ Set on the **server** process:
 
 | Variable | Effect |
 |---|---|
-| `RESOLV_FAKE_LLM=1` | `acomplete()` and `complete()` return a litellm `ModelResponse` with a short canned text reply and no tool calls (a JSON-schema extractor call gets an all-null claim). `run_agent_once()` returns `{"order_id": None, "claim_type": None}` (or `""` with no output key). No provider is called and no key is needed. |
+| `RESOLV_FAKE_LLM=1` | `acomplete()` and `complete()` return a litellm `ModelResponse` with a short canned text reply and no tool calls (a JSON-schema extractor call gets an all-null claim). No provider is called and no key is needed. |
 | `FAKE_LLM_LATENCY_S` | seconds each fake call sleeps (default `0`), standing in for provider latency |
 
 Each `/resolve` then costs one fake extractor call and one fake agent call, so it ends with a plain reply and no
