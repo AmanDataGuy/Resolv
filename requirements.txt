@@ -1,16 +1,15 @@
 # Runtime dependencies (the API, the agent loop and the Streamlit demo). Exact pins; check a
 # package's release notes before bumping it. Eval-only deps: requirements-eval.txt. Tools: requirements-dev.txt.
-google-adk==2.3.0
 fastapi==0.139.0
 uvicorn[standard]==0.50.0
 pydantic==2.12.3
 python-dotenv==1.2.2
-litellm==1.91.0
+litellm==1.106.2          # the release LiteLLM names as clean after the compromised 1.107.0 (Oct 2026); never 1.107.0
 openai==2.44.0
 httpx==0.28.1
-langfuse==4.15.6          # tracing; no-op without keys (resolv/observability.py). 4.16+ needs otel>=1.45, adk caps it at 1.42.1
-opentelemetry-api==1.42.1
-opentelemetry-sdk==1.42.1
+langfuse==4.18.0          # tracing; no-op without keys (resolv/observability.py). Needs otel>=1.45
+opentelemetry-api==1.45.2
+opentelemetry-sdk==1.45.2
 streamlit==1.59.2         # demo UI (app.py)
 numpy==2.1.3              # numpy/pyarrow pinned to a known-good pandas/streamlit build
 pyarrow==18.1.0
