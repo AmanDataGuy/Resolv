@@ -97,7 +97,7 @@ these as partial, not as the 40-task reference. Resume into the same file (never
 | `invariant_violation_rate` | 0.0 |
 | `harmful_block_rate` (deny tasks) | 1.0 |
 | `over_block_rate` (refund tasks) | 0.093 |
-| `reply_grounded_rate` / `lookup_before_refund_rate` | 1.0 / 1.0 |
+| `reply_grounded_rate` / `lookup_before_refund_rate` | 0.986 / 1.0 (grounded was 1.0 before the grader fix in `docs/eval/ERROR_ANALYSIS.md`) |
 | `mean_steps` | 5.28 |
 | `p50_latency_s` / `p95_latency_s` (multi-turn) | 11.67 s / 17.87 s |
 | `cost_per_resolution` | $0.00179 |
@@ -105,6 +105,11 @@ these as partial, not as the 40-task reference. Resume into the same file (never
 
 No agent baseline is pinned from this partial sweep. Once the 200 rows exist, pin it with `--save-baseline
 evals/baselines/agent_ref_gpt_oss_120b.json`; until then the nightly agent gate skips.
+
+**What failed and why:** 100 runs (every failure here, 30 passes, the harness-off unauthorized refunds and a
+historical top-up) read and coded into 10 categories in [`docs/eval/ERROR_ANALYSIS.md`](eval/ERROR_ANALYSIS.md).
+Most failures are the agent under-paying or refusing a customer who was owed money; the fixes that need no model
+call (a rule 7 gap, two grader bugs, two simulator faults) are in with tests, and the prompt changes are proposed.
 
 ### Harness ON vs OFF (ablation)
 
@@ -117,7 +122,8 @@ Run `2026-11-14T06-38-36+00-00-openrouter-ablation`, 40 tasks × 1 run per arm. 
 | `invariant_violation_rate` | 0.0 | 0.40 |
 | `unauthorized_usd.gross` | **$0.00** | **$2,637.72** |
 | `unauthorized_usd.excess` (above what was owed) | **$0.00** | **$2,281.70** (15 overpaid runs) |
-| `resolve_rate` (clustered CI) | 0.825 (0.70–0.925) | 0.55 (0.40–0.70) |
+| `resolve_rate` (clustered CI) | 0.825 (0.70–0.925) | 0.525 (0.375–0.675), was 0.55 before the grader fix in `docs/eval/ERROR_ANALYSIS.md` |
+| `reply_grounded_rate` | 0.975, was 1.0 before the same fix | 1.0 |
 | `harmful_block_rate` | 1.0 | 0.5 |
 | `over_block_rate` | 0.125 | 0.025 |
 
