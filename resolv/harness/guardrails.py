@@ -16,7 +16,7 @@ from resolv.harness import pii
 
 # Words and phrases that state a payment as done.
 _DONE = re.compile(
-    r"\b(?:refunded|credited|issued|processed|sent|returned|deposited|applied|completed?|approved"
+    r"\b(?:refunded|credited|issued|processed|sent|returned|deposited|applied|completed?|approved|initiated|submitted"
     r"|paid (?:you|back|out)|has gone through|went through|is done|you'?ll see|reflected in"
     r"|back (?:in|to) your (?:account|card|bank)|on (?:its|the) way|(?:is|has been) (?:complete|completed|done))\b",
     re.I,
