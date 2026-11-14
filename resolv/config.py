@@ -62,6 +62,8 @@ EXTRACTOR_BACKEND = os.environ.get("EXTRACTOR_BACKEND", "json")
 # Check the provider pages before trusting a dollar figure.
 PRICES_USD_PER_MTOK = {
     "groq/openai/gpt-oss-120b": (0.15, 0.60),
+    # OpenRouter list price; it may route to a cheaper host, so this is an upper bound on the bill.
+    "openrouter/openai/gpt-oss-120b": (0.15, 0.60),
     "gemini/gemini-3.6-flash": (0.75, 3.75),
     "gemini/gemini-3.5-flash": (1.50, 9.00),
 }
