@@ -12,6 +12,7 @@ new simulator model never reuses another model's turns.
 """
 import hashlib
 import json
+import re
 from functools import lru_cache
 from pathlib import Path
 
@@ -131,4 +132,5 @@ def reply(task: dict, agent_said: str, turns_so_far: list[dict]) -> str | None:
     # roles are inverted for the customer model: the support agent's words arrive as its "user" input
     flipped = [{**m, "role": "user" if m["role"] == "assistant" else "assistant"} for m in history]
     out = _ask(task, flipped)
-    return None if out.strip().upper().startswith("DONE") else out
+    # DONE ends the chat at either end of the message ("Thanks. DONE" was reaching the agent)
+    return None if re.match(r"\s*DONE\b", out, re.I) or re.search(r"\bDONE\W*$", out, re.I) else out
