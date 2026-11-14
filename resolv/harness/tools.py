@@ -8,6 +8,10 @@ ledger transaction, so the check cannot be skipped or raced. A refusal comes bac
 explain, never an exception, and every attempt is recorded, malformed ones included, with the caller on it.
 Money moves as a saga: reserve a pending refund (local, undoable), call the payment provider (the point of no
 return), then settle, compensate on a decline, or park as `unknown` for the reconciler.
+Two operator switches sit between the policy verdict and the money: REFUNDS_FROZEN=1 (kill switch) turns every
+refund policy would allow into an escalation (rule_id `refunds_frozen`), and RESOLV_SHADOW=1 records the allowed
+refund as `shadow_mode` ("would have refunded $X") and moves no money. Both are read on every call; denials are
+unchanged by either.
 **Used by:** resolv/agents/loop.py, resolv/api/escalations.py, evals/*.
 """
 import os
@@ -23,6 +27,16 @@ from resolv.integrations import payments
 MAX_RECONCILE_ATTEMPTS = 3
 _PENDING_TEXT = "Refund submitted; confirmation pending. Tell the customer it is processing, not that it is done."
 _DECLINED_TEXT = "Refund could not be processed by the payment provider; escalated to a person."
+_SHADOW_TEXT = "Not refunded — sent to a human for review."
+
+
+# True when RESOLV_SHADOW=1. Refused in test and eval runs, so a score can never silently measure a dry run.
+def _shadow() -> bool:
+    if os.environ.get("RESOLV_SHADOW") != "1":
+        return False
+    if os.environ.get("RESOLV_ENV") in ("test", "eval"):
+        raise RuntimeError("RESOLV_SHADOW=1 is not allowed when RESOLV_ENV is test or eval.")
+    return True
 
 
 # Read an order the caller owns. Missing and foreign orders return identical text, so IDs cannot be probed.
@@ -94,6 +108,15 @@ def issue_refund(case_id: str, order_id: str, claim_type: str, amount_usd: float
                 approval = None
         history = ledger.case_trail(case_id, conn) + ledger.order_refund_records(order_id, conn)
         decision = check_refund(order_id, claim_type, amount_usd, history, caller_id, approval)
+        if decision.action == "allow" and os.environ.get("REFUNDS_FROZEN") == "1":  # kill switch: a person decides
+            decision = Decision(action="escalate", rule_id="refunds_frozen",
+                                reason=f"Refunds are frozen; policy said {decision.rule_id}: {decision.reason}")
+        if decision.action == "allow" and _shadow():  # record what would have been paid, move no money
+            shadow = Decision(action="escalate", rule_id="shadow_mode",
+                              reason=f"Shadow mode: would have refunded ${amount_usd:.2f} ({decision.rule_id}).")
+            ledger.append_audit(conn, case_id, "issue_refund", order_id, args, shadow, False, _SHADOW_TEXT,
+                                caller_id, approver_id)
+            return _SHADOW_TEXT
 
         if decision.action != "allow":
             if decision.action == "escalate":

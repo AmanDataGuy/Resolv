@@ -9,7 +9,7 @@ live refund even if a rule is ever skipped. Each audit record carries an HMAC ov
 anyone without AUDIT_HMAC_KEY who edits, deletes or reorders records is caught by `verify()`. Money is stored in
 integer cents. Threat limit: someone with DB write access AND the key can rewrite history; it is not a WORM store.
 **Used by:** resolv/harness/audit.py (facade), resolv/harness/tools.py (refund saga), resolv/api/escalations.py, resolv/integrations/notify.py,
-resolv/agents/loop.py (step journal).
+resolv/agents/loop.py (step journal), resolv/api/main.py (/resolve idempotency keys), resolv/mcp_server.py (reads only).
 """
 import hashlib
 import hmac
