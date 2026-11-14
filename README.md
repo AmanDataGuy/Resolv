@@ -12,7 +12,7 @@
 
 <p align="center">
   <a href="https://github.com/AmanDataGuy/Resolv/actions/workflows/ci.yml"><img alt="CI" src="https://github.com/AmanDataGuy/Resolv/actions/workflows/ci.yml/badge.svg"></a>
-  <img alt="tests" src="https://img.shields.io/badge/tests-449%20passing-brightgreen">
+  <img alt="tests" src="https://img.shields.io/badge/tests-460%20passing-brightgreen">
   <img alt="python" src="https://img.shields.io/badge/python-3.11-3776AB">
   <a href="LICENSE"><img alt="license" src="https://img.shields.io/badge/license-MIT-blue"></a>
 </p>
@@ -31,7 +31,7 @@
 | :------------------------------- | ----------: | ----------: |
 | Refunds paid that policy forbids | **0 of 40** |    16 of 40 |
 | Money paid above what was owed   |      **$0** |   $2,281.70 |
-| Cases resolved correctly         |   **82.5%** |         55% |
+| Cases resolved correctly         |   **82.5%** |       52.5% |
 
 | Also measured                                   |                            Result |
 | :---------------------------------------------- | --------------------------------: |
@@ -101,7 +101,7 @@ harness off, the same model pays 16 refunds it should not. More in [architecture
 git clone https://github.com/AmanDataGuy/Resolv && cd Resolv
 python3.11 -m venv venv && source venv/bin/activate
 pip install -r requirements-dev.txt
-pytest -q                                  # 449 tests, no network, no key
+pytest -q                                  # 460 tests, no network, no key
 cp .env.example .env                       # add one provider key
 uvicorn resolv.api.main:app --port 8010    # POST /token, POST /resolve, /console, /health
 streamlit run app.py                       # the demo UI
@@ -112,15 +112,16 @@ canned model replies.
 
 ## Evaluation
 
-| Eval                       |                  Size |                   Result | Note                                   |
-| :------------------------- | --------------------: | -----------------------: | :------------------------------------- |
-| Harness on vs off          |      40 cases per arm |      0 vs 16 bad refunds | $2,281.70 overpaid with it off         |
-| Reliability, pass^k        | 28 tasks x 5, partial | pass^1 0.83, pass^5 0.71 | over-block 9.3%, unauthorized 0        |
-| Extractor vs regex         |              92 cases |           89.1% vs 89.1% | no significant difference              |
-| Prompt injection           |              144 runs |                   0 harm | no lift over control is significant    |
-| Red team, 11 families      |              288 runs |                   0 harm | every identity spoof refused           |
-| Latency, cost, reliability |               25 runs |  4.7 s, $0.0018 per case | 25 of 25 succeeded                     |
-| Load, fake model           |         24 rate steps |      knee 40 to 60 req/s | after moving SQLite off the event loop |
+| Eval                       |                  Size |                   Result | Note                                            |
+| :------------------------- | --------------------: | -----------------------: | :---------------------------------------------- |
+| Harness on vs off          |      40 cases per arm |      0 vs 16 bad refunds | $2,281.70 overpaid with it off                  |
+| Reliability, pass^k        | 28 tasks x 5, partial | pass^1 0.83, pass^5 0.71 | over-block 9.3%, unauthorized 0                 |
+| Extractor vs regex         |              92 cases |           89.1% vs 89.1% | no significant difference                       |
+| Prompt injection           |              144 runs |                   0 harm | no lift over control is significant             |
+| Red team, 11 families      |              288 runs |                   0 harm | every identity spoof refused                    |
+| Latency, cost, reliability |               25 runs |  4.7 s, $0.0018 per case | 25 of 25 succeeded                              |
+| Load, fake model           |         24 rate steps |      knee 40 to 60 req/s | after moving SQLite off the event loop          |
+| Error analysis             |        100 runs coded |    10 failure categories | found and closed a split-refund approval bypass |
 
 CI runs the keyless suite, replays recorded trajectories and checks the eval gate's false-positive rate on every
 push. A nightly job gates the live model against a pinned baseline. Method, every run and the older July 2026
@@ -145,6 +146,7 @@ numbers: [eval report](docs/eval_report.md), [metrics](docs/eval/METRICS.md), [r
 | Product requirements                       | [docs/PRD.md](docs/PRD.md)                                                                            |
 | Threat model                               | [docs/THREAT_MODEL.md](docs/THREAT_MODEL.md)                                                          |
 | Eval report, metrics, red team             | [docs/eval_report.md](docs/eval_report.md), [docs/eval/](docs/eval/METRICS.md)                        |
+| Error analysis: what fails and why         | [docs/eval/ERROR_ANALYSIS.md](docs/eval/ERROR_ANALYSIS.md)                                            |
 | Runbook: SLOs, kill switch, restore drill  | [docs/RUNBOOK.md](docs/RUNBOOK.md)                                                                    |
 | Scaling past one node                      | [docs/scale_out.md](docs/scale_out.md)                                                                |
 | MCP server setup                           | [docs/mcp.md](docs/mcp.md)                                                                            |
