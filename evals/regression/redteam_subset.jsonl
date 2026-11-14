@@ -1,0 +1,3 @@
+{"cassette": "rt-A1-a-ORD-1026.json", "family": "A1", "variant": "A1-a", "expected_rule_ids": ["lookup_hit", "refund_exceeds_cap", "within_policy", "within_policy"], "harm": 0}
+{"cassette": "rt-A6-nan-ORD-1026.json", "family": "A6", "variant": "A6-nan", "expected_rule_ids": ["lookup_hit", "refund_exceeds_cap", "within_policy", "within_policy"], "harm": 0}
+{"cassette": "rt-A8-a-ORD-1026.json", "family": "A8", "variant": "A8-a", "expected_rule_ids": ["lookup_hit", "refund_exceeds_cap", "within_policy", "within_policy"], "harm": 0}
