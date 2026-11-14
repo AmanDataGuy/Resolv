@@ -67,7 +67,7 @@ with the evidence attached.
 ## Rollout plan
 
 1. **Shadow mode.** The agent runs on real complaints, but tool calls are recorded and not
-   executed. Humans resolve as today. A shadow switch does not exist in the code yet. Compare the agent's decisions with the humans'. Exit when
+   executed. Humans resolve as today. Switch: `RESOLV_SHADOW=1` (see `docs/RUNBOOK.md`). Compare the agent's decisions with the humans'. Exit when
    unauthorized = 0 and the decision agreement is acceptable to the support lead (threshold set
    before the run starts).
 2. **Assisted.** Every refund is escalated: X = $0, so a human approves each one in the console.

@@ -25,7 +25,7 @@ This is a single-node, demo-grade deployment: one process, one SQLite file (`RES
 
 | Alert | First action | Then |
 |---|---|---|
-| `unauthorized > 0` (a refund paid that policy forbids) | **Freeze refunds**: set `REFUNDS_FROZEN=1` and restart (needs the kill switch below) | Export the case trace from Langfuse. Run the chain check. Write a failing test that reproduces it before any fix |
+| `unauthorized > 0` (a refund paid that policy forbids) | **Freeze refunds**: set `REFUNDS_FROZEN=1` and restart (kill switch below) | Export the case trace from Langfuse. Run the chain check. Write a failing test that reproduces it before any fix |
 | Provider errors / circuit breaker open (`/resolve` returns 503) | Check the provider status page and the breaker state in logs (`CircuitOpen`) | Wait for the breaker to half-open, or switch provider (`AGENT_MODEL` etc. to another provider's model) and restart |
 | Provider daily quota exhausted | `/resolve` degrades to 503. Customers see "try again" | Switch provider or wait for the reset. Do not raise retry counts |
 | `unknown` or `pending` refunds older than 10 min | Run the reconciler: `python -c "from resolv.harness import tools; print(tools.reconcile_once())"` | If a row stays `unknown` after 3 attempts it becomes `failed` and a review escalation is filed. Check the PSP for that idempotency key |
@@ -35,9 +35,28 @@ This is a single-node, demo-grade deployment: one process, one SQLite file (`RES
 
 ### Kill switch
 
-`REFUNDS_FROZEN=1` should make policy escalate every refund, as a rule placed right after rule 0.
-**Not built yet:** `resolv/harness/policy.py` has no `refunds_frozen` rule today. Until it exists, the
-freeze is to stop the API process.
+`REFUNDS_FROZEN=1` (set it and restart) stops all money. In `resolv/harness/tools.py` `issue_refund`, any
+refund policy would allow becomes an escalation with `rule_id=refunds_frozen`: it is recorded in the
+audit trail, an approval lands in the console, and the customer's ticket is routed to a team. Refunds policy
+denies are still denied for their real reason. Approving in the console while frozen pays nothing either: it
+re-escalates. The check sits after `check_refund`, not inside it, so policy stays pure and replays of past
+refunds (the `unauthorized` monitor) still judge them by the rules alone. Unset it and restart to resume;
+approvals filed while frozen can then be approved normally.
+
+### Shadow mode
+
+`RESOLV_SHADOW=1` runs the agent and the policy on real complaints but moves no money: a refund policy would
+allow is recorded with `rule_id=shadow_mode`, `action=escalate`, `ok=0`, and the reason "Shadow mode: would
+have refunded $X (<policy rule_id>)". No refund row, no payment call; the ticket is routed to a person.
+Compare these rows with what the humans decided. It is refused (RuntimeError) when `RESOLV_ENV` is `test` or
+`eval`, so an eval can never score a dry run. With both switches set, the freeze wins.
+
+### Idempotency on /resolve
+
+Clients may send an `Idempotency-Key` header (1-255 chars) on `POST /resolve`. The first response is stored
+in the ledger's `idempotency` table for 24 h; a repeat with the same key and body returns it without running a
+new case. The same key with a different body or customer gets 422; a repeat while the first is still running
+gets 409. A failed request releases its key so the client can retry.
 
 ## Key rotation
 
