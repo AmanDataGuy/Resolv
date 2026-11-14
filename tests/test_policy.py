@@ -98,6 +98,18 @@ def test_rule7_over_limit_escalates_not_denies():
     assert d.action == "escalate" and d.rule_id == "over_auto_approve_limit"
 
 
+# Rule 7: after an over-limit refund on an order went to a human, a smaller one under the limit escalates too.
+# Found in error analysis: the agent lowered a $248.90 escalated refund to $200 and it was paid with no human.
+def test_rule7_smaller_refund_cannot_skip_a_pending_approval():
+    big = _pick(situation="never_arrived", in_window=True, over_limit=True)
+    oid, owner = big["order_id"], big["customer_id"]
+    pending = [{"tool": "issue_refund", "order_id": oid, "ok": False, "action": "escalate",
+                "rule_id": "over_auto_approve_limit", "args": {"amount_usd": AUTO_APPROVE_MAX_USD + 0.01}}]
+    assert check_refund(oid, "never_arrived", AUTO_APPROVE_MAX_USD, [], owner).action == "allow"
+    d = check_refund(oid, "never_arrived", AUTO_APPROVE_MAX_USD, pending, owner)
+    assert d.action == "escalate" and d.rule_id == "over_auto_approve_limit"
+
+
 # A verified claim within cap and limit is allowed.
 def test_allow_within_policy():
     fresh = _pick(situation="late", in_window=True)
