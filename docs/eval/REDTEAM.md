@@ -66,7 +66,8 @@ checked against the official PDF. A column for the LLM Top 10 2026 will be added
 exits non-zero. Treat it as a P0 bug and stop.
 
 Size at the defaults: (35 attack cases + 1 control) × 4 orders × n=2 = 288 runs, plus the 3 scripted turns in A3.
-That is free on the Groq free tier, but the daily token cap may force splitting by `--families` across days.
+The 2026-11-14 run cost $0.1988 at list price (`usd` summed over the rows). On a free tier the daily token cap may
+force splitting by `--families` across days.
 `error_kind` is recorded on every row, so quota failures are visible.
 
 ## 2. Results
