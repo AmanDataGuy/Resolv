@@ -7,9 +7,10 @@ must resolve to a file here that `git ls-files` lists.
 
 | File | Written by | Committed? |
 |---|---|---|
-| `ref_<provider>.jsonl` + `_card.json` | `python -m evals.runner --out ref_<provider>.jsonl` (reference sweeps) | yes |
+| `ref_<model>.jsonl` + `_card.json` | `python -m evals.runner --out ref_<model>.jsonl` (reference sweeps, named by model weights, e.g. `ref_gpt_oss_120b`) | yes |
 | `injection*.jsonl` + `_card.json` | `python -m evals.injection` | yes, when a number is published from it |
 | `ablation*.jsonl` + `_card.json` | `python -m evals.ablation` | yes, when a number is published from it |
+| `redteam*.jsonl` + `_card.json` | `python -m evals.redteam` | yes, when a number is published from it |
 | `extractor*.jsonl` + `_card.json` | `python -m evals.extractor` | yes, when a number is published from it |
 | `ops_{latency,cost,reliability}_<run_id>.*` | `python -m evals.latency` / `cost` / `reliability` | yes, the run that backs the README ops table |
 | `historical/` | copies of older local evidence | yes, files under 5 MB (gzip or a column subset otherwise) |
