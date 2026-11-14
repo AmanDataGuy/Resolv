@@ -201,3 +201,30 @@ def test_reject_constant_blocks_infinity():
         with pytest.raises(ValueError):
             loop._parse_args(raw)
     assert loop._parse_args(json.dumps({"amount_usd": 1.5})) == {"amount_usd": 1.5}
+
+
+# Journal writes run in a worker thread, so a slow SQLite commit cannot stall the event loop.
+@pytest.mark.asyncio
+async def test_journal_write_runs_off_the_event_loop(case, monkeypatch):
+    """With durable execution on, every add_step call happens off the thread that runs the event loop."""
+    import threading
+    from resolv.harness import ledger
+
+    loop_thread, seen = threading.get_ident(), []
+    real_add_step = ledger.add_step
+
+    # Record which thread wrote the step, then write it for real.
+    def spy(*args):
+        seen.append(threading.get_ident())
+        real_add_step(*args)
+    monkeypatch.setenv("RESOLV_DURABLE", "1")
+    monkeypatch.setattr(ledger, "add_step", spy)
+    monkeypatch.setattr(loop, "extract", _fake_extract)
+    resp = _fake_response(_FakeMessage(content="Happy to help."))
+    resp.model_dump = lambda: {}  # the journal stores the response's dump
+    monkeypatch.setattr(loop, "acomplete", _replies(resp))
+
+    await loop.run_case(case, "where is my order")
+
+    assert seen and loop_thread not in seen
+    assert len(ledger.steps(case)) == len(seen)
