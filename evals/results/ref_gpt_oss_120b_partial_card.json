@@ -88,7 +88,7 @@
     "resolve_rate_excl_infra": 0.8286,
     "crashes_by_kind": {},
     "mean_steps": 5.28,
-    "reply_grounded_rate": 1.0,
+    "reply_grounded_rate": 0.9857,
     "lookup_before_refund_rate": 1.0,
     "recovery_rate": 0.8281,
     "p50_latency_s": 11.67,
@@ -119,6 +119,15 @@
       "deff": 3.2314,
       "n_eff": 43.3
     },
-    "usd_total_all_rows": 0.2116
+    "usd_total_all_rows": 0.2116,
+    "regrade": {
+      "reason": "grader fixes from docs/eval/ERROR_ANALYSIS.md: a run with an unauthorized refund or an invariant violation is not resolved; 'initiated' and 'submitted' count as claiming a refund happened",
+      "changed": {
+        "reply_grounded_rate": [
+          1.0,
+          0.9857
+        ]
+      }
+    }
   }
 }
