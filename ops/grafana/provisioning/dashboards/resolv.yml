@@ -1,0 +1,8 @@
+# ops/grafana/provisioning/dashboards/resolv.yml - loads the dashboards in /var/lib/grafana/dashboards.
+apiVersion: 1
+providers:
+  - name: resolv
+    folder: Resolv
+    type: file
+    options:
+      path: /var/lib/grafana/dashboards

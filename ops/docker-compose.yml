@@ -1,0 +1,29 @@
+# ops/docker-compose.yml - a local ops stack: the Resolv API on a fake model (no key, no cost), Prometheus with the
+# alert rules, and Grafana with the Resolv dashboard provisioned. Run from the repo root:
+#   docker compose -f ops/docker-compose.yml up -d --build      (down -v to stop and remove volumes)
+# Host ports are bound to 127.0.0.1 only: API 8010, Prometheus 9090, Grafana 3000 (anonymous viewer).
+services:
+  api:
+    build: ..
+    command: uvicorn resolv.api.main:app --host 0.0.0.0 --port 8000
+    environment:
+      RESOLV_FAKE_LLM: "1"
+      RESOLV_ENV: dev
+      # Optional: export one in your shell so a client (app.py, curl) can compute receipt proofs for /token.
+      ORDER_PROOF_SECRET: ${ORDER_PROOF_SECRET:-}
+    ports: ["127.0.0.1:8010:8000"]
+  prometheus:
+    image: prom/prometheus:v3.7.3
+    volumes:
+      - ./prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./alerts.yml:/etc/prometheus/alerts.yml:ro
+    ports: ["127.0.0.1:9090:9090"]
+  grafana:
+    image: grafana/grafana:12.2.1
+    environment:
+      GF_AUTH_ANONYMOUS_ENABLED: "true"
+      GF_AUTH_ANONYMOUS_ORG_ROLE: Viewer
+    volumes:
+      - ./grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./grafana/dashboards:/var/lib/grafana/dashboards:ro
+    ports: ["127.0.0.1:3000:3000"]

@@ -1,0 +1,35 @@
+# ops/alerts.yml - the three Prometheus alert rules for Resolv, read by ops/prometheus.yml.
+# Each one has a plain-English description; docs/RUNBOOK.md says what to do when it fires.
+groups:
+  - name: resolv
+    rules:
+      - alert: RefundPayoutSpike
+        # Last hour's payout rate vs the day before it, with a $200/h floor so a quiet day can't page.
+        expr: |
+          sum(rate(resolv_refund_usd_total[1h])) > 3 * sum(rate(resolv_refund_usd_total[1d] offset 1h))
+          and sum(increase(resolv_refund_usd_total[1h])) > 200
+        for: 10m
+        labels:
+          severity: page
+        annotations:
+          summary: Refund payouts spiked
+          description: Refunds paid in the last hour are more than three times the normal hourly rate of the day before.
+      - alert: ResolveErrorRateHigh
+        expr: |
+          sum(rate(resolv_errors_total{kind!="background_job"}[10m]))
+          / (sum(rate(resolv_resolve_seconds_count[10m])) + sum(rate(resolv_errors_total{kind!="background_job"}[10m])))
+          > 0.05
+        for: 10m
+        labels:
+          severity: page
+        annotations:
+          summary: /resolve error rate above 5%
+          description: More than 5 in 100 resolve requests failed with an error over the last 10 minutes.
+      - alert: LLMCostBurnHigh
+        expr: sum(rate(resolv_llm_cost_usd_total[1h])) * 86400 > 10
+        for: 15m
+        labels:
+          severity: ticket
+        annotations:
+          summary: LLM spend on pace for more than $10 a day
+          description: At the last hour's rate, model spend would pass the $10 daily budget.
