@@ -9,11 +9,14 @@ This is a single-node, demo-grade deployment: one process, one SQLite file (`RES
 | SLO | Target | Measured by | Current |
 |---|---|---|---|
 | Availability (`/health` returns 200) | 99% monthly (single machine, no failover) | external uptime probe | no probe running yet |
-| End-to-end `/resolve` p95 | ≤ 15 s | `evals/latency.py`, `loadtest/resolve.py` | real model on the deploy: no run yet. Resolv's own share is small: with a fake 1.6 s model, p95 is 1.644 s at 40 req/s |
+| End-to-end `/resolve` p95 | ≤ 15 s | `resolv_resolve_seconds` (p95 panel), `evals/latency.py`, `loadtest/resolve.py` | real model on the deploy: no run yet. Resolv's own share is small: with a fake 1.6 s model, p95 is 1.644 s at 40 req/s |
 | First action p95 (first tool call) | ≤ 6 s | `evals/latency.py` | real model on the deploy: no run yet |
 | `/health` p95 while `/resolve` is busy | ≤ 100 ms | `loadtest/resolve.py` health probe | 9 ms at 40 req/s, 168-179 ms at 60 req/s (fake model, one worker) |
 | Sustained `/resolve` load per node | ≤ 40 req/s (two thirds of the 60 req/s knee) | `loadtest/resolve.py` | 40 req/s held twice: 38.957-38.958 ok/s, 0 errors, p95 1.619-1.644 s |
+| `/resolve` errors | ≤ 5% of requests over 10 min | `resolv_errors_total` vs `resolv_resolve_seconds_count`, alert `ResolveErrorRateHigh` | no production traffic yet |
 | Unauthorized refunds | 0, always | `resolv/invariants.py`, audit trail | must stay 0 |
+| Refund payouts | no hour above 3x the previous day's hourly rate (and over $200) | `resolv_refund_usd_total`, alert `RefundPayoutSpike` | no production traffic yet |
+| LLM spend | ≤ $10 a day | `resolv_llm_cost_usd_total`, alert `LLMCostBurnHigh` | fake model only so far |
 | Escalations decided | ≤ 24 h (they expire at 24 h) | `escalations` table: `decided_at - created_at` | no production traffic yet |
 
 The load numbers come from `loadtest/results/fake_llm_knee.json`: a fake model with 0.8 s per call, one
@@ -23,6 +26,16 @@ The deploy VM is smaller than the laptop, so re-run the sweep there before trust
 
 ## Dashboards
 
+- **Prometheus and Grafana:** `GET /metrics` exposes `resolv_refund_decisions_total{decision,rule}`,
+  `resolv_refund_usd_total`, `resolv_resolve_seconds`, `resolv_llm_cost_usd_total`, `resolv_refunds_frozen` and
+  `resolv_errors_total{kind}` (defined in `resolv/metrics.py`). `ops/` holds the scrape config, the three alert
+  rules (`alerts.yml`) and a six-panel Grafana dashboard. Local stack on a fake model:
+  `docker compose -f ops/docker-compose.yml up -d --build`, then Grafana at 127.0.0.1:3000, Prometheus at
+  127.0.0.1:9090, the API at 127.0.0.1:8010; `down -v` removes it. Export `ORDER_PROOF_SECRET` first if a client
+  (app.py with `RESOLV_API_URL`, or curl) needs receipt proofs for `/token`.
+- **`/metrics` has no auth, on purpose.** It holds only counts, rule ids and error kinds, never customer data,
+  and Prometheus scrapes it from inside the private network. Do not route `/metrics` through the public proxy:
+  block it there, so only the internal network can read it.
 - **Langfuse:** one trace per `/resolve` (root agent span, LLM spans, tool spans), plus online
   scores from `resolv/monitor.py`.
 - **Approvals queue:** `/console` (pending count, age, time to expiry).
@@ -32,6 +45,9 @@ The deploy VM is smaller than the laptop, so re-run the sweep there before trust
 
 | Alert | First action | Then |
 |---|---|---|
+| `RefundPayoutSpike` (Prometheus) | Look at the "Refund decisions" panel by rule, and recent `issue_refund` rows in the audit trail | If the payouts are not explained by real traffic, freeze refunds (kill switch below) and treat it like `unauthorized > 0` |
+| `ResolveErrorRateHigh` (Prometheus) | Read `resolv_errors_total` by kind: `circuit_open` is the provider, `resolve_failed` is in the logs | Follow the provider row below for `circuit_open`; for `resolve_failed` read the logged traceback |
+| `LLMCostBurnHigh` (Prometheus) | Check traffic (`resolv_resolve_seconds_count`) and the model in use (`AGENT_MODEL`) | If traffic is normal, a prompt or model change raised the cost per case. Roll it back or lower the per-IP rate limit |
 | `unauthorized > 0` (a refund paid that policy forbids) | **Freeze refunds**: set `REFUNDS_FROZEN=1` and restart (kill switch below) | Export the case trace from Langfuse. Run the chain check. Write a failing test that reproduces it before any fix |
 | Provider errors / circuit breaker open (`/resolve` returns 503) | Check the provider status page and the breaker state in logs (`CircuitOpen`) | Wait for the breaker to half-open, or switch provider (`AGENT_MODEL` etc. to another provider's model) and restart |
 | Provider daily quota exhausted | `/resolve` degrades to 503. Customers see "try again" | Switch provider or wait for the reset. Do not raise retry counts |
@@ -48,7 +64,7 @@ audit trail, an approval lands in the console, and the customer's ticket is rout
 denies are still denied for their real reason. Approving in the console while frozen pays nothing either: it
 re-escalates. The check sits after `check_refund`, not inside it, so policy stays pure and replays of past
 refunds (the `unauthorized` monitor) still judge them by the rules alone. Unset it and restart to resume;
-approvals filed while frozen can then be approved normally.
+approvals filed while frozen can then be approved normally. `resolv_refunds_frozen` reads 1 while it is on.
 
 ### Shadow mode
 
@@ -60,7 +76,9 @@ Compare these rows with what the humans decided. It is refused (RuntimeError) wh
 
 ### Idempotency on /resolve
 
-Clients may send an `Idempotency-Key` header (1-255 chars) on `POST /resolve`. The first response is stored
+Clients may send an `Idempotency-Key` header (1-255 chars) on `POST /resolve` or `POST /resolve/stream`; both
+share one key table, so a key first used on the stream replays on `/resolve` and the other way round (a replay on
+the stream sends only the stored `result` event). The first response is stored
 in the ledger's `idempotency` table for 24 h; a repeat with the same key and body returns it without running a
 new case. The same key with a different body or customer gets 422; a repeat while the first is still running
 gets 409. A failed request releases its key so the client can retry.
