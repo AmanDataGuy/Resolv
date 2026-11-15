@@ -12,7 +12,7 @@
 
 <p align="center">
   <a href="https://github.com/AmanDataGuy/Resolv/actions/workflows/ci.yml"><img alt="CI" src="https://github.com/AmanDataGuy/Resolv/actions/workflows/ci.yml/badge.svg"></a>
-  <img alt="tests" src="https://img.shields.io/badge/tests-460%20passing-brightgreen">
+  <img alt="tests" src="https://img.shields.io/badge/tests-465%20passing-brightgreen">
   <img alt="python" src="https://img.shields.io/badge/python-3.11-3776AB">
   <a href="LICENSE"><img alt="license" src="https://img.shields.io/badge/license-MIT-blue"></a>
 </p>
@@ -102,7 +102,7 @@ harness off, the same model pays 16 refunds it should not. More in [architecture
 git clone https://github.com/AmanDataGuy/Resolv && cd Resolv
 python3.11 -m venv venv && source venv/bin/activate
 pip install -r requirements-dev.txt
-pytest -q                                  # 460 tests; with no key the 2 tone-judge tests skip
+pytest -q                                  # 465 tests; with no key the 2 tone-judge tests skip
 cp .env.example .env                       # add one provider key
 uvicorn resolv.api.main:app --port 8010    # POST /token, POST /resolve, /console, /health
 streamlit run app.py                       # the demo UI
