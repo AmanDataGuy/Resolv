@@ -407,11 +407,42 @@ async def run_case_events(
 
 
 # Resolve one complaint end to end and return {reply, claim, steps, trail, ...}; a drain of run_case_events().
+# on_event, when given, sees every event as it happens (resolv/api/main.py streams them through public_view).
 async def run_case(
-    case_id: str, message: str, temperature: float = 0.7, user=None, caller_id: str | None = None,
+    case_id: str, message: str, temperature: float = 0.7, user=None, caller_id: str | None = None, on_event=None,
 ) -> dict:
     result: dict = {}
     async for event in run_case_events(case_id, message, temperature, user, caller_id):
+        if on_event:
+            on_event(event)
         if event["type"] == "done":
             result = event["result"]
     return result
+
+
+# Turn run_case_events events into the PII-masked steps a client may watch, passed to `sink` one by one: the
+# intake read, each tool call as a *proposal*, each new audit record (the harness's decision, or a saga step once a
+# refund is authorized), and the guarded reply. Only audit records are shown as outcomes: they exist only after the
+# harness decided. No prompt, no message history, no caller id.
+def public_view(case_id: str, sink):
+    shown = 0
+
+    # Send the audit records written since the last event, then this event's own step.
+    def on_event(event: dict) -> None:
+        nonlocal shown
+        trail = audit.read(case_id)
+        saga = False
+        for r in trail[shown:]:
+            sink({"type": "saga" if saga else "decision", "case_id": case_id, "tool": r["tool"],
+                  "order_id": r["order_id"], "decision": r["action"], "rule_id": r["rule_id"],
+                  "reason": pii.mask(r["reason"] or ""), "ok": r["ok"]})
+            saga = saga or r["tool"] == "authorize_refund"  # what follows an authorization is the payment saga
+        shown = len(trail)
+        if event["type"] == "intake":
+            sink({"type": "intake", "case_id": case_id, "claim": pii.mask_any(event["claim"])})
+        elif event["type"] == "tool_call":
+            sink({"type": "proposal", "case_id": case_id, "tool": event["name"], "args": pii.mask_any(event["args"])})
+        elif event["type"] == "reply":
+            sink({"type": "reply", "case_id": case_id, "reply": pii.mask(event["reply"])})
+
+    return on_event
