@@ -400,7 +400,7 @@ changed since, so these are not a before/after for the current numbers. They are
 The suite needs no API key and no network. Run for this report on 2026-11-14 with Python 3.11:
 
 - With provider keys blanked (as CI runs): **458 passed, 2 skipped** (the two tone-judge tests skip without a key).
-- `pytest --collect-only -q`: **460 tests** in 37 modules. `ruff check .` passes.
+- `pytest --collect-only -q`: **465 tests** in 38 modules (rechecked 2026-11-15). `ruff check .` passes.
 
 | Area | What the tests check | Modules | Tests |
 | :-- | :-- | :-- | --: |
