@@ -11,13 +11,14 @@ return), then settle, compensate on a decline, or park as `unknown` for the reco
 Two operator switches sit between the policy verdict and the money: REFUNDS_FROZEN=1 (kill switch) turns every
 refund policy would allow into an escalation (rule_id `refunds_frozen`), and RESOLV_SHADOW=1 records the allowed
 refund as `shadow_mode` ("would have refunded $X") and moves no money. Both are read on every call; denials are
-unchanged by either.
+unchanged by either. The final verdict and the money settled are counted here for /metrics (resolv/metrics.py).
 **Used by:** resolv/agents/loop.py, resolv/api/escalations.py, evals/*.
 """
 import os
 import sqlite3
 import uuid
 
+from resolv import metrics
 from resolv.config import REFUND_CAP_FRACTION
 from resolv.harness import audit, ledger
 from resolv.harness.policy import Decision, action_hash, check_refund, refundable
@@ -112,9 +113,11 @@ def issue_refund(case_id: str, order_id: str, claim_type: str, amount_usd: float
             decision = Decision(action="escalate", rule_id="refunds_frozen",
                                 reason=f"Refunds are frozen; policy said {decision.rule_id}: {decision.reason}")
         if decision.action == "allow" and _shadow():  # record what would have been paid, move no money
-            shadow = Decision(action="escalate", rule_id="shadow_mode",
-                              reason=f"Shadow mode: would have refunded ${amount_usd:.2f} ({decision.rule_id}).")
-            ledger.append_audit(conn, case_id, "issue_refund", order_id, args, shadow, False, _SHADOW_TEXT,
+            decision = Decision(action="escalate", rule_id="shadow_mode",
+                                reason=f"Shadow mode: would have refunded ${amount_usd:.2f} ({decision.rule_id}).")
+        metrics.REFUND_DECISIONS.labels(decision.action, decision.rule_id).inc()  # the one final verdict per request
+        if decision.rule_id == "shadow_mode":
+            ledger.append_audit(conn, case_id, "issue_refund", order_id, args, decision, False, _SHADOW_TEXT,
                                 caller_id, approver_id)
             return _SHADOW_TEXT
 
@@ -177,6 +180,7 @@ def _pay(refund_id, key, case_id, order_id, args, cents, decision, caller_id, ap
 def _settle(conn, refund_id, case_id, order_id, cents, psp_ref) -> bool:
     if not ledger.set_refund_status(conn, refund_id, "settled", psp_ref):
         return False
+    metrics.REFUND_USD.inc(cents / 100)  # the provider has already paid, so count it even if this commit fails
     ledger.add_outbox(conn, "customer_refund_confirmation",
                       {"case_id": case_id, "order_id": order_id, "amount_usd": cents / 100, "psp_ref": psp_ref})
     return True
