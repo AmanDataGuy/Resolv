@@ -1,7 +1,8 @@
 """
 # tests/test_auth.py
 
-**What:** resolv/api/auth.py tokens and order-proof codes, and the /token + /resolve gates in resolv/api/main.py.
+**What:** resolv/api/auth.py tokens and order-proof codes, the /token + /resolve gates in resolv/api/main.py, and a
+check that every route is guarded or listed as open.
 **Why:** a token is issued only for a valid receipt proof, unknown orders and wrong proofs are indistinguishable,
 approver tokens can't be minted over HTTP, prod fails closed without secrets, and every rejection happens
 before any LLM call. Keyless.
@@ -131,6 +132,23 @@ class TestEndpoints:
         assert client.post("/resolve", json={"message": "hi", "token": "forged.garbage"}).status_code == 401
         expired = auth.issue_token("cust-1", ttl_seconds=-1)
         assert client.post("/resolve", json={"message": "hi", "token": expired}).status_code == 401
+
+    # Every route either refuses a caller with no valid token or proof, or is listed here as open on purpose.
+    # /metrics is open: it holds counts by rule id only, and stays off the public proxy (docs/RUNBOOK.md).
+    def test_every_route_is_guarded_or_listed_open(self, client):
+        open_routes = {"/health", "/metrics"}  # plus /console (static files) and FastAPI's docs, not in the schema
+        bad = {"message": "hi", "token": "forged.garbage", "order_id": ORDER, "proof": "AAAAAAAAAA", "note": ""}
+        headers = {"Authorization": "Bearer forged.garbage", "Idempotency-Key": "guard-check"}
+        checked = 0
+        for path, methods in app.openapi()["paths"].items():
+            if path in open_routes:
+                continue
+            for method in methods:
+                url = path.replace("{esc_id}", "esc-x")
+                assert client.request(method, url, json=bad, headers=headers).status_code in (401, 403), \
+                    f"{method} {path} answers without auth; guard it or list it as open"
+                checked += 1
+        assert checked >= 6  # /token, /resolve, /resolve/stream and the escalation routes
 
 
 # Auth secrets fail closed outside dev.
