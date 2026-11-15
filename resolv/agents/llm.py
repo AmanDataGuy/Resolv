@@ -18,7 +18,7 @@ from collections import deque
 from contextvars import ContextVar
 
 from resolv import config
-from resolv import observability
+from resolv import metrics, observability
 
 MAX_LLM_ATTEMPTS = 15
 CALL_TIMEOUT_S = 30  # per acomplete() attempt; one stuck provider call can't hold a request forever
@@ -178,9 +178,10 @@ def _on_success(resp, span, model: str) -> None:
     prompt, completion, cached = usage_of(resp)
     served = getattr(resp, "model", None)
     _meter_add(prompt, completion, served)
+    cost = config.price_usd(model, prompt, completion)
+    metrics.LLM_COST_USD.inc(cost)
     finish = [getattr(c, "finish_reason", None) for c in (getattr(resp, "choices", None) or [])]
-    observability.set_chat_response(span, served, prompt, completion, cached,
-                                    config.price_usd(model, prompt, completion), finish)
+    observability.set_chat_response(span, served, prompt, completion, cached, cost, finish)
 
 
 # Load-test mode: RESOLV_FAKE_LLM=1 swaps every model call for a canned reply, so a capacity run measures Resolv.
