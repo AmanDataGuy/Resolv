@@ -1,7 +1,7 @@
 {
   "manifest": {
-    "run_id": "2026-11-16T17-36-48+00-00-gemini-ref_gemini_2_5_flash_lite",
-    "git_sha": "6fb23c5",
+    "run_id": "2026-11-16T18-54-28+00-00-gemini-ref_gemini_2_5_flash_lite",
+    "git_sha": "abfc653",
     "git_dirty": false,
     "provider": "gemini",
     "agent_model": "gemini/gemini-2.5-flash-lite",
@@ -13,41 +13,64 @@
     "openings_sha": "f8d8d2c63d8e",
     "temperature": 0.7,
     "seed": 0,
-    "started_at": "2026-11-16T17:36:48+00:00"
+    "started_at": "2026-11-16T18:54:28+00:00"
   },
   "card": {
     "tasks": 40,
     "runs": 200,
-    "pass^3": 0.6925,
+    "pass^3": 0.7075,
     "pass^3_ci95_clustered": [
-      0.56,
-      0.82
+      0.575,
+      0.835
     ],
-    "pass^1": 0.76,
+    "pass^1": 0.765,
     "unauthorized_rate": 0.0,
     "invariant_violation_rate": 0.0,
     "harmful_block_rate": 1.0,
     "over_block_rate": 0.21,
-    "resolve_rate": 0.76,
+    "resolve_rate": 0.765,
     "resolve_ci95": [
-      0.6963,
-      0.8139
+      0.7016,
+      0.8184
     ],
     "resolve_ci95_clustered": [
       0.64,
-      0.87
+      0.875
     ],
-    "resolve_rate_excl_infra": 0.76,
-    "crashes_by_kind": {
-      "timeout": 1
-    },
-    "mean_steps": 5.18,
+    "resolve_rate_excl_infra": 0.765,
+    "crashes_by_kind": {},
+    "mean_steps": 5.21,
     "reply_grounded_rate": 1.0,
     "lookup_before_refund_rate": 0.9919,
-    "recovery_rate": 0.6623,
-    "p50_latency_s": 12.3,
-    "p95_latency_s": 24.37,
-    "usd_total": 0.1647,
-    "cost_per_resolution": 0.001083
+    "recovery_rate": 0.6667,
+    "p50_latency_s": 12.29,
+    "p95_latency_s": 23.42,
+    "usd_total": 0.165,
+    "cost_per_resolution": 0.001078,
+    "pass^1_ci95_clustered": [
+      0.64,
+      0.875
+    ],
+    "pass^2": 0.73,
+    "pass^2_ci95_clustered": [
+      0.6025,
+      0.85
+    ],
+    "pass^4": 0.69,
+    "pass^4_ci95_clustered": [
+      0.55,
+      0.825
+    ],
+    "pass^5": 0.675,
+    "pass^5_ci95_clustered": [
+      0.525,
+      0.825
+    ],
+    "design_effect_resolved": {
+      "icc": 0.8094,
+      "deff": 4.2377,
+      "n_eff": 47.2
+    },
+    "usd_total_all_rows": 0.165
   }
 }
