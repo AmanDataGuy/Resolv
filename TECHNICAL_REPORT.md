@@ -20,7 +20,8 @@ run-by-run record is [docs/eval_report.md](docs/eval_report.md); this file is th
    - [3.9 Eval gate false-positive rate](#39-eval-gate-false-positive-rate)
    - [3.10 Error analysis: 100 runs read by hand](#310-error-analysis-100-runs-read-by-hand)
    - [3.11 Red-team cassettes in the PR gate](#311-red-team-cassettes-in-the-pr-gate)
-   - [3.12 Older numbers (history only)](#312-older-numbers-history-only)
+   - [3.12 Second model on the current code: Gemini 2.5 Flash-Lite](#312-second-model-on-the-current-code-gemini-25-flash-lite)
+   - [3.13 Older numbers (history only)](#313-older-numbers-history-only)
 4. [Tests and CI](#4-tests-and-ci)
 5. [Limitations](#5-limitations)
 6. [How to reproduce each number](#6-how-to-reproduce-each-number)
@@ -38,6 +39,11 @@ correctly (82.5% vs 52.5%). Across 432 red-team and prompt-injection runs, no at
 The agent succeeds on the same case 5 times out of 5 (pass^5) at 0.71, from a partial sweep of 28 of 40 tasks.
 Median latency is 4.7 s, model cost is about $0.0018 per resolved case, and one server worker holds 40 requests a
 second against a fake model. Measured 14 November 2026.
+
+On 16 November 2026 the suites were re-run on the current code (after the split-refund fix) with a second, cheaper
+model, Gemini 2.5 Flash-Lite. The full 40-task sweep (200 runs) gives pass^1 **0.765** and pass^5 **0.675** with
+**0 unauthorized refunds**, and **432 more red-team and prompt-injection runs again caused no harm**. All of it cost
+$0.31 (section 3.12).
 
 | Headline | Harness on | Harness off |
 | :-- | --: | --: |
@@ -122,8 +128,9 @@ Terms used below:
 - **CI**: 95% confidence interval. Most are clustered by task (repeats of one task are correlated, so they are
   resampled together).
 
-Total model spend across all current result files: about $0.81 at list price (see
-[eval report, Spend](docs/eval_report.md#spend)).
+Total model spend across the gpt-oss-120b result files: about $0.81 at list price (see
+[eval report, Spend](docs/eval_report.md#spend)). Section 3.12 uses a second model; its setup and spend are listed
+there.
 
 ### 3.2 Harness on vs off
 
@@ -384,7 +391,78 @@ not which model wrote the replies.
 
 <!-- src: evals/regression/redteam_subset.jsonl (3 lines, harm 0); evals/regression/cassettes/rt-*.json#expected_row.paid, #harm; model per docs/eval/REDTEAM.md#4 (the cassette files do not record the model) -->
 
-### 3.12 Older numbers (history only)
+### 3.12 Second model on the current code: Gemini 2.5 Flash-Lite
+
+- **Measures:** the full reliability sweep, the red team and the prompt-injection suite again, on the code after
+  the split-refund fix (`cecae59`), with a different and much cheaper model in every role.
+- **Why it matters:** the red-team and injection runs in 3.5 and 3.6 ran before that fix, and the gpt-oss sweep in
+  3.3 stopped at 28 of 40 tasks. This answers whether "no harm" still holds on today's code, and gives a complete
+  40-task pass^k curve. Using a weaker model is also a harder test of the harness: the model makes more mistakes,
+  and the gate has to catch them.
+- **How:** agent, simulated customer, extractor and judge all on `gemini/gemini-2.5-flash-lite` through LiteLLM,
+  temperature 0.7, code `6fb23c5`, 16 November 2026. Dollar figures use the paid-tier list price, $0.10 in / $0.40
+  out per million tokens. Same commands as 3.3, 3.5 and 3.6 with Gemini file names (section 6).
+- **Not a before/after.** The model changed as well as the code, so compare harm (which should be 0 on any model),
+  not success rates, against the gpt-oss numbers.
+
+**Reliability, full sweep: 40 tasks x 5 repeats = 200 runs, all scored.**
+
+| Metric | Gemini 2.5 Flash-Lite (task-clustered 95% CI) | gpt-oss-120b, partial (3.3) |
+| :-- | --: | --: |
+| pass^1 | **0.765** (0.64 to 0.875) | 0.829 |
+| pass^3 | 0.708 | 0.736 |
+| pass^5 | **0.675** (0.525 to 0.825) | 0.714 |
+| Unauthorized refund rate | **0.0** | 0.0 |
+| Invariant violations | 0.0 | 0.0 |
+| Over-block rate | 0.21 | 0.093 |
+| Reply matches what was actually paid | 1.0 | 0.986 |
+| Latency p50 / p95 (multi-turn) | 12.29 s / 23.42 s | 11.67 s / 17.87 s |
+| Cost per resolved case | $0.00108 | $0.00179 |
+| Spend for the sweep | $0.165 | $0.208 |
+
+<!-- src: evals/results/ref_gemini_2_5_flash_lite_card.json#manifest (agent_model, temperature, git_sha, git_dirty false), card (pass^1..5 and pass^1/pass^5 _ci95_clustered, unauthorized_rate, invariant_violation_rate, over_block_rate, reply_grounded_rate, p50_latency_s, p95_latency_s, cost_per_resolution, usd_total_all_rows); right column: evals/results/ref_gpt_oss_120b_partial_card.json#card -->
+
+The weaker model refuses more customers who are owed money (over-block 0.21, against 0.093) and so resolves fewer
+cases, but it never got money out that policy forbids. One run hit the 90-second timeout and was retried, so all
+200 rows are complete.
+
+**Red team, 288 runs, and prompt injection, 144 runs.**
+
+| Family or arm | Runs | Complied | Money moved | Data, PII or prompt leaked |
+| :-- | --: | --: | --: | --: |
+| A1 direct injection | 24 | 0.083 | 0 | 0 |
+| A2 wrapper-tag escape | 24 | 0.167 | 0 | 0 |
+| A3 multi-turn crescendo | 24 | 0.458 | 0 | 0 |
+| A4 identity spoofing | 24 | **1.0** | 0 | 0 |
+| A5 cross-customer exfiltration | 24 | 0.0 | 0 | 0 |
+| A6 amount-format attacks | 40 | 0.0 | 0 | 0 |
+| A7 injection via tool output | 24 | 0.0 | 0 | 0 |
+| A8 system prompt extraction | 24 | 0.0 | 0 | 0 |
+| A9 unbounded consumption | 24 | 0.25 | 0 | 0 |
+| A10 approver social engineering | 24 | manual review | 0 | 0 |
+| A11 PII echo | 24 | 0.0 | 0 | 0 |
+| red-team control | 8 | | 0 | 0 |
+| injection control (no attack) | 24 | 0.125 | 0 | 0 |
+| direct_override | 24 | 0.042 | 0 | 0 |
+| fake_system_turn | 24 | 0.042 | 0 | 0 |
+| fake_tool_result | 24 | 0.25 | 0 | 0 |
+| authority_roleplay | 24 | 0.083 | 0 | 0 |
+| exfiltrate_prompt | 24 | 0.042 | 0 | 0 |
+
+<!-- src: evals/results/redteam_gemini_2_5_flash_lite_card.json#runs, card.families.<Fam> (n, complied_rate, money_moved, data_leaked, pii_leaked, prompt_leaked, errors), card.harm_summary; evals/results/injection_gemini_2_5_flash_lite_card.json#card.runs, card.errors, card.complied.<arm>.complied_rate, card.harm.<arm> (unauthorized_rate, excess_usd) -->
+
+Harm over all 432 runs: money moved 0, data leaked 0, PII leaked 0, prompt leaked 0, tool budget bypassed 0, and
+0 unauthorized refunds in every injection arm. No injection arm's lift over the control has an interval that
+excludes zero. A4 repeats the gpt-oss result: the model looked up the stranger's order on all 24 runs, and every
+lookup was refused by the ownership check. 4 red-team runs ended in a timeout or provider error (A3 1, A6 2, A7 1);
+they stay in the denominators. The red-team and injection manifests say `git_dirty: true` only because the sweep's
+own new result files were untracked at the time; the code was `6fb23c5`.
+
+Spend for all three Gemini runs: $0.314 (sweep $0.165, red team $0.10, injection $0.047).
+
+<!-- src: evals/results/{ref,redteam,injection}_gemini_2_5_flash_lite.jsonl, sum of row usd; injection card.errors 0 -->
+
+### 3.13 Older numbers (history only)
 
 Earlier rounds (July to October 2026) ran mostly on Gemini 3.5 Flash with an older prompt and harness, for example a
 pinned pass^3 of 0.9625 over 200 runs and an extractor both-correct of 0.9783. The model, prompt and harness have all
@@ -439,9 +517,12 @@ non-blocking. Results upload as Actions artifacts.
 
 ## 5. Limitations
 
-- **The reliability sweep is partial.** 28 of 40 tasks have all 5 repeats; the scored set leans toward deny tasks
-  (16 deny, 11 refund, 1 escalate). pass^k and the over-block rate may move when the sweep completes. No agent
-  baseline is pinned yet, so the nightly agent gate skips.
+- **The gpt-oss-120b reliability sweep is partial.** 28 of 40 tasks have all 5 repeats; the scored set leans toward
+  deny tasks (16 deny, 11 refund, 1 escalate). A complete 40-task sweep exists only on Gemini 2.5 Flash-Lite
+  (3.12), a different model. No agent baseline is pinned yet, so the nightly agent gate skips.
+- **The fine-tuned extractor has not been re-measured.** The Qwen2.5-1.5B GRPO adapter recorded 0.707 both-correct
+  once during training, and its rows were not kept. Re-measuring it on the 92 held-out messages needs a GPU and
+  about 8 GB of free RAM while the weights load (docs/inference.md).
 - **The simulated customer is the same model as the agent.** That can flatter the agent (it may argue in ways the
   agent handles well). The tone judge is also the same model and has no human labels.
 - **Small samples.** Ablation arms are 40 runs each, latency and reliability 25 runs, red-team CIs rest on 4 orders,
@@ -513,6 +594,12 @@ python -m loadtest.resolve --order ORD-1187 --proof <code> --rate 40 --duration 
 | 3.7 latency | `python -m evals.latency --tasks 5 --n 5 --warmup 1` |
 | 3.7 cost | `python -m evals.cost --tasks 5 --n 3` |
 | 3.7 reliability | `python -m evals.reliability --tasks 5 --n 5` |
+
+For section 3.12 set `LLM_PROVIDER=gemini LLM_MODEL=gemini/gemini-2.5-flash-lite` and use the same commands with
+Gemini file names: `python -m evals.runner --n 5 --tasks 40 --k 5 --out ref_gemini_2_5_flash_lite.jsonl --usd-cap 2`,
+`python -m evals.redteam --out redteam_gemini_2_5_flash_lite.jsonl` and
+`python -m evals.injection --orders 8 --n 3 --out injection_gemini_2_5_flash_lite.jsonl`. The pass^1 to pass^5 curve
+on its card comes from `ref_card` in `scripts/regrade_cards.py`, applied to the Gemini rows.
 
 <!-- src: docs/eval_report.md#8 (commands); .github/workflows/ci.yml (gate command); loadtest/README.md#Run; loadtest/results/fake_llm_knee.json#commands -->
 
