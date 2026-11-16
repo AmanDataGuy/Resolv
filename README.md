@@ -36,21 +36,27 @@
 
 | Also measured                                   |                            Result |
 | :---------------------------------------------- | --------------------------------: |
-| Attacks that caused harm (red team, injection)  |                 **0** in 432 runs |
-| Same case passed 5 times out of 5 (pass^5)      | **0.71**, pass^1 0.83<sup>1</sup> |
-| End-to-end latency, median / p95                |                     4.7 s / 7.7 s |
-| Model cost per resolved case                    |                           $0.0018 |
-| Server knee under load (fake model, one worker) |                60 req/s, 0 errors |
+| Attacks that caused harm (red team, injection)  |       **0** in 864 runs<sup>2</sup> |
+| Same case passed 5 times out of 5 (pass^5)      |   **0.71**, pass^1 0.83<sup>1</sup> |
+| Full 40-task sweep on a cheaper model, pass^5   | **0.675**, pass^1 0.765<sup>2</sup> |
+| End-to-end latency, median / p95                |                       4.7 s / 7.7 s |
+| Model cost per resolved case                    |                             $0.0018 |
+| Server knee under load (fake model, one worker) |                  60 req/s, 0 errors |
 
-<sup>1</sup> Partial sweep: 28 of the 40 tasks have all 5 repeats so far. Model `openai/gpt-oss-120b` via LiteLLM,
-temperature 0.7, measured 14 Nov 2026. Every number comes from a committed result file; see the
-[eval report](docs/eval_report.md).
+<sup>1</sup> Partial sweep: 28 of the 40 tasks have all 5 repeats. Model `openai/gpt-oss-120b` via LiteLLM,
+temperature 0.7, measured 14 Nov 2026.<br>
+<sup>2</sup> Re-run on 16 Nov 2026 on the current code (after the split-refund fix) with Gemini 2.5 Flash-Lite in
+every role: 200 runs with 0 unauthorized refunds, and 432 attack runs with 0 harm, for $0.31 in total. The 864
+attack runs are 432 on each model.<br>
+Every number comes from a committed result file; see the [technical report](TECHNICAL_REPORT.md).
 
 <!-- src:
   harness on/off: evals/results/ablation_gpt_oss_120b_card.json#cards.on, cards.off (unauthorized_rate x runs, unauthorized_usd.excess, resolve_rate)
   red team 288 runs: evals/results/redteam_gpt_oss_120b_card.json#card.harm_summary
   injection 144 runs: evals/results/injection_gpt_oss_120b_card.json#card.harm
   pass^k: evals/results/ref_gpt_oss_120b_partial_card.json#card.pass^1, card.pass^5
+  second model: evals/results/ref_gemini_2_5_flash_lite_card.json#card.pass^1, card.pass^5, card.unauthorized_rate;
+    evals/results/redteam_gemini_2_5_flash_lite_card.json#card.harm_summary; evals/results/injection_gemini_2_5_flash_lite_card.json#card.harm
   latency: evals/results/ops_latency_2026-11-14T06-54-54+00-00-openrouter-latency_card.json#card.e2e_s
   cost: evals/results/ref_gpt_oss_120b_partial_card.json#card.cost_per_resolution
   load: loadtest/results/fake_llm_knee.json
@@ -117,6 +123,8 @@ canned model replies.
 | :------------------------- | --------------------: | -----------------------: | :---------------------------------------------- |
 | Harness on vs off          |      40 cases per arm |      0 vs 16 bad refunds | $2,281.70 overpaid with it off                  |
 | Reliability, pass^k        | 28 tasks x 5, partial | pass^1 0.83, pass^5 0.71 | over-block 9.3%, unauthorized 0                 |
+| Same, Gemini 2.5 Flash-Lite |        40 tasks x 5 | pass^1 0.765, pass^5 0.675 | over-block 21%, unauthorized 0, $0.17       |
+| Attacks again, current code |  288 + 144 runs, Flash-Lite |               0 harm | after the split-refund fix, $0.15           |
 | Extractor vs regex         |              92 cases |           89.1% vs 89.1% | no significant difference                       |
 | Prompt injection           |              144 runs |                   0 harm | no lift over control is significant             |
 | Red team, 11 families      |              288 runs |                   0 harm | every identity spoof refused                    |
@@ -129,13 +137,14 @@ push. A nightly job, when a `GROQ_API_KEY` secret is set, gates the live extract
 agent gate joins once the full sweep is saved as a baseline. Method, every run and the older July 2026 numbers:
 [eval report](docs/eval_report.md), [metrics](docs/eval/METRICS.md), [red team](docs/eval/REDTEAM.md).
 
-<!-- src: evals/results/*_gpt_oss_120b*_card.json, inference/results/extractor/serve_regex.json,
+<!-- src: evals/results/*_gpt_oss_120b*_card.json, evals/results/*_gemini_2_5_flash_lite_card.json, inference/results/extractor/serve_regex.json,
      evals/results/ops_*_card.json, loadtest/results/fake_llm_knee.json -->
 
 ## Limitations
 
 - Not deployed yet. It runs locally or in Docker; a Render deployment is planned.
-- The reliability sweep is partial (28 of 40 tasks); the rest resumes when model credit is added.
+- The gpt-oss-120b reliability sweep is partial (28 of 40 tasks); the full 40-task sweep exists only on Gemini 2.5
+  Flash-Lite, a different model.
 - The simulated customer uses the same model as the agent, which can flatter the agent.
 - The hosted extractor does not beat a regex baseline on this data.
 - One node only: SQLite and in-process rate limits. What breaks first, and the design past it: [scale-out](docs/scale_out.md).
