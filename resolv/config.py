@@ -66,6 +66,8 @@ PRICES_USD_PER_MTOK = {
     "openrouter/openai/gpt-oss-120b": (0.15, 0.60),
     "gemini/gemini-3.6-flash": (0.75, 3.75),
     "gemini/gemini-3.5-flash": (1.50, 9.00),
+    # Paid-tier list price from aistudio.google.com/docs/pricing, checked 2026-11-16.
+    "gemini/gemini-2.5-flash-lite": (0.10, 0.40),
 }
 
 
